@@ -79,6 +79,49 @@ trfb_connection_t* trfb_connection_create(trfb_server_t *srv, int sock, struct s
 # define BUFSIZ 8192
 #endif
 
+static int negotiate(trfb_connection_t* con)
+{
+	trfb_msg_protocol_version_t msg;
+	unsigned char buf[256];
+
+	msg.proto = trfb_v8;
+
+	if (trfb_msg_protocol_version_send(&msg, con->sock)) {
+		trfb_msg("Can't send ProtocolVersion message");
+		return -1;
+	}
+
+	if (trfb_msg_protocol_version_recv(&msg, con->sock)) {
+		trfb_msg("[%s] Can't get ProtocolVersion message from client", con->name);
+		return -1;
+	}
+
+	con->version = msg.proto;
+
+	/* TODO: security */
+	buf[0] = 1;
+	buf[1] = 1; /* NONE */
+	if (trfb_send_all(con->sock, buf, 2) != 2) {
+		return -1;
+	}
+
+	if (trfb_recv_all(con->sock, buf, 1) != 1) {
+		return -1;
+	}
+
+	if (buf[0] != 1) {
+		trfb_msg("[%s] Client has sent invalid security type", con->name);
+		return -1;
+	}
+
+	memset(buf, 0, 4); /* Security Ok */
+	if (trfb_send_all(con->sock, buf, 4) != 4) {
+		return -1;
+	}
+
+	return 0;
+}
+
 static int connection(void *con_in)
 {
 	trfb_connection_t *con = con_in;
@@ -100,6 +143,10 @@ static int connection(void *con_in)
 	mtx_lock(&con->lock);
 	con->state = TRFB_STATE_WORKING;
 	mtx_unlock(&con->lock);
+
+	if (negotiate(con)) {
+		EXIT_THREAD(TRFB_STATE_ERROR);
+	}
 
 	for (;;) {
 		mtx_lock(&con->lock);

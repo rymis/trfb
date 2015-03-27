@@ -59,6 +59,8 @@ struct trfb_server {
 struct trfb_connection {
 	trfb_server_t *server;
 
+	trfb_protocol_t version;
+
 	unsigned state;
 
 	/* Client information */
@@ -103,6 +105,18 @@ void trfb_msg(const char *fmt, ...);
 
 trfb_connection_t* trfb_connection_create(trfb_server_t *srv, int sock, struct sockaddr *addr, socklen_t addrlen);
 void trfb_connection_free(trfb_connection_t *con);
+
+/* Protocol messages: */
+ssize_t trfb_send_all(int sock, const void *buf, size_t len);
+ssize_t trfb_recv_all(int sock, void *buf, size_t len);
+
+typedef struct trfb_msg_protocol_version {
+	trfb_protocol_t proto;
+} trfb_msg_protocol_version_t;
+int trfb_msg_protocol_version_encode(trfb_msg_protocol_version_t *msg, unsigned char *buf, size_t *len);
+int trfb_msg_protocol_version_decode(trfb_msg_protocol_version_t *msg, const unsigned char *buf, size_t len);
+int trfb_msg_protocol_version_send(trfb_msg_protocol_version_t *msg, int sock);
+int trfb_msg_protocol_version_recv(trfb_msg_protocol_version_t *msg, int sock);
 
 /* extern "C" { */
 #ifdef __cplusplus
