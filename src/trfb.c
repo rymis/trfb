@@ -23,7 +23,7 @@ trfb_server_t *trfb_server_create(size_t width, size_t height)
 	S->state = TRFB_STATE_STOPPED;
 	S->width = width;
 	S->height = height;
-	S->pixels = calloc(3 * width * height, 1);
+	S->pixels = calloc(width * height, sizeof(uint32_t));
 	if (!S->pixels) {
 		trfb_msg("Not enought memory");
 		free(S);
