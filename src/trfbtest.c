@@ -46,6 +46,7 @@ int main(int argc, char *argv[])
 	trfb_server_t *srv;
 	int ac;
 	const char* av[32];
+	unsigned i, j, di = 0;
 
 	srv = trfb_server_create(640, 480);
 	if (!srv) {
@@ -64,6 +65,13 @@ int main(int argc, char *argv[])
 	}
 
 	for (;;) {
+		for (i = 0; i < 256; i++) {
+			for (j = 0; j < 256; j++) {
+				trfb_framebuffer_set_pixel(srv->fb, (i + di) % 256, j, TRFB_RGB(i, j, 100));
+			}
+		}
+		di = (di + 10) % 256;
+
 		if (!fgets(buf, sizeof(buf), stdin)) {
 			strcpy(buf, "exit");
 		}

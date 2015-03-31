@@ -11,7 +11,7 @@ static int connection(void *con_in);
 
 void trfb_connection_free(trfb_connection_t *con)
 {
-	free(con->pixels);
+	trfb_framebuffer_free(con->fb);
 	trfb_io_free(con->io);
 	mtx_destroy(&con->lock);
 	free(con);
@@ -42,14 +42,9 @@ trfb_connection_t* trfb_connection_create(trfb_server_t *srv, int sock, struct s
 		return NULL;
 	}
 
-	C->pixels = calloc(srv->width * srv->height, sizeof(uint32_t));
-	if (!C->pixels) {
-		free(C);
-		trfb_msg("Not enought memory for pixels buffer");
-		return NULL;
-	}
-
+	C->fb = NULL;
 	C->server = srv;
+
 	mtx_init(&C->lock, mtx_plain);
 	C->next = NULL;
 	C->state = TRFB_STATE_WORKING;
@@ -72,7 +67,6 @@ trfb_connection_t* trfb_connection_create(trfb_server_t *srv, int sock, struct s
 
 	/* Run connection processing thread: */
 	if (thrd_create(&C->thread, connection, C) != thrd_success) {
-		free(C->pixels);
 		free(C);
 		trfb_msg("Can't start thread");
 		return NULL;
@@ -101,6 +95,8 @@ static int negotiate(trfb_connection_t* con)
 
 	trfb_connection_write_all(con, buf, len);
 	trfb_connection_read_all(con, buf, 12);
+	buf[12] = 0;
+	trfb_msg("I:[%s] client wants version: %s", con->name, buf);
 
 	if (trfb_msg_protocol_version_decode(&msg, buf, 12)) {
 		trfb_msg("[%s] Can't decode ProtocolVersion message from client", con->name);
@@ -110,30 +106,42 @@ static int negotiate(trfb_connection_t* con)
 	con->version = msg.proto;
 
 	/* TODO: security */
-	buf[0] = 1;
-	buf[1] = 1; /* NONE */
-	trfb_connection_write_all(con, buf, 2);
+	if (con->version < trfb_v7) {
+		buf[0] = 0;
+		buf[1] = 0;
+		buf[2] = 0;
+		buf[3] = 1;
+		trfb_connection_write_all(con, buf, 4);
+	} else {
+		buf[0] = 1;
+		buf[1] = 1; /* NONE */
+		trfb_connection_write_all(con, buf, 2);
 
-	trfb_connection_read_all(con, buf, 1);
-	if (buf[0] != 1) {
-		trfb_msg("[%s] Client has sent invalid security type", con->name);
-		return -1;
+		trfb_connection_read_all(con, buf, 1);
+		trfb_msg("I:[%s] client security type %d", con->name, buf[0]);
+		if (buf[0] != 1) {
+			trfb_msg("[%s] Client has sent invalid security type", con->name);
+			return -1;
+		}
 	}
 
-	memset(buf, 0, 4); /* Security Ok */
-	trfb_connection_write_all(con, buf, 4);
-	trfb_connection_read_all(con, buf, 1);
+	if (con->version >= trfb_v8) {
+		memset(buf, 0, 4); /* Security Ok */
+		trfb_connection_write_all(con, buf, 4);
+		trfb_msg("I:[%s] sent security Ok", con->name);
+	}
 
+	trfb_connection_read_all(con, buf, 1);
 	trfb_msg("I:ClientInit: %02X", buf[0]);
 
 	/* Sending ServerInit: */
-	buf[0] = con->server->width / 256;
-	buf[1] = con->server->width % 256;
-	buf[2] = con->server->height / 256;
-	buf[3] = con->server->height % 256;
+	buf[0] = con->server->fb->width / 256;
+	buf[1] = con->server->fb->width % 256;
+	buf[2] = con->server->fb->height / 256;
+	buf[3] = con->server->fb->height % 256;
 	buf[4] = 32; /* bits per pixel */
-	buf[5] = 3; /* depth */
-	buf[6] = 1; /* big-endian */
+	buf[5] = 24; /* depth */
+	buf[6] = 0; /* big-endian */
 	buf[7] = 1; /* true-color */
 	buf[8] = 0x00; /* red-max */
 	buf[9] = 0xff;
@@ -184,12 +192,31 @@ static void check_stopped(trfb_connection_t *con)
 }
 
 static void SetEncodings(trfb_connection_t *con);
+static void SetPixelFormat(trfb_connection_t *con);
+static void UpdateRequest(trfb_connection_t *con);
+static void KeyEvent(trfb_connection_t *con);
+static void PointerEvent(trfb_connection_t *con);
+static void ClientCutText(trfb_connection_t *con);
+
+static struct msg_types {
+	unsigned char type;
+	void (*process)(trfb_connection_t *con);
+} msg_types[] = {
+	{ 0, SetPixelFormat },
+	{ 2, SetEncodings },
+	{ 3, UpdateRequest },
+	{ 4, KeyEvent },
+	{ 5, PointerEvent },
+	{ 6, ClientCutText },
+	{ 0, NULL }
+};
 
 static int connection(void *con_in)
 {
 	trfb_connection_t *con = con_in;
 	unsigned char buf[BUFSIZ];
 	ssize_t len, l;
+	int i;
 	ssize_t pos = -1;
 	int rv;
 	unsigned char type;
@@ -214,26 +241,24 @@ static int connection(void *con_in)
 	for (;;) {
 		check_stopped(con);
 
-		trfb_connection_read_all(con, &type, 1);
+		l = trfb_connection_read(con, &type, 1);
+		if (l < 0) {
+			EXIT_THREAD(TRFB_STATE_ERROR);
+		}
 
-		switch (type) {
-			case 0: /* SetPixelFormat */
-				break;
-			case 2: /* Set encoding */
-				SetEncodings(con);
-				break;
-			case 3: /* FrameBuffer update request */
-				break;
-			case 4: /* Key Event */
-				break;
-			case 5: /* PointerEvent */
-				break;
-			case 6: /* ClientCutText */
-				break;
-			default:
+		if (l == 1) {
+			trfb_msg("I:message[%d]", type);
+
+			for (i = 0; msg_types[i].process; i++)
+				if (msg_types[i].type == type)
+					break;
+
+			if (!msg_types[i].process) {
 				trfb_msg("Message of unknown type: %d\n", type);
 				EXIT_THREAD(TRFB_STATE_ERROR);
-				break;
+			}
+
+			msg_types[i].process(con);
 		}
 	}
 
@@ -341,7 +366,7 @@ uint16_t trfb_connection_read_u16(trfb_connection_t *con)
 {
 	unsigned char buf[2];
 	trfb_connection_read_all(con, buf, 2);
-	return (buf[0] << 8) + buf[1];
+	return buf[0] * 256 + buf[1];
 }
 
 uint16_t trfb_connection_read_u32(trfb_connection_t *con)
@@ -353,16 +378,178 @@ uint16_t trfb_connection_read_u32(trfb_connection_t *con)
 
 static void SetEncodings(trfb_connection_t *con)
 {
-	uint16_t cnt;
+	unsigned cnt;
 	unsigned i;
 	uint32_t enc;
+	unsigned char buf[4];
 
-	trfb_connection_read_all(con, &cnt, 1); /* pad */
-	cnt = trfb_connection_read_u16(con);
+	trfb_connection_read_all(con, buf, 3);
+	cnt = buf[1] * 256 + buf[2];
+
+	trfb_msg("I:client supports %d encodings...", (int)cnt);
 
 	for (i = 0; i < cnt; i++) {
 		enc = trfb_connection_read_u32(con);
 		trfb_msg("I:Supported encoding: %08x", (int)enc);
+	}
+}
+
+static void SetPixelFormat(trfb_connection_t *con)
+{
+	unsigned char buf[20];
+
+	trfb_connection_read_all(con, buf + 1, 19);
+	con->format.bpp = buf[4];
+	con->format.depth = buf[5];
+	con->format.big_endian = buf[6];
+	con->format.true_color = buf[7];
+	con->format.rmax = buf[8] * 256 + buf[9];
+	con->format.gmax = buf[10] * 256 + buf[11];
+	con->format.bmax = buf[12] * 256 + buf[13];
+	con->format.rshift = buf[14];
+	con->format.gshift = buf[15];
+	con->format.bshift = buf[16];
+
+	trfb_msg("I:[%s] FORMAT: bpp = %d, depth = %d, big_endian = %d, true_color = %d", con->name,
+			con->format.bpp,
+			con->format.depth,
+			con->format.big_endian,
+			con->format.true_color);
+
+	if (con->fb)
+		trfb_framebuffer_free(con->fb);
+	mtx_lock(&con->server->lock);
+	con->fb = trfb_framebuffer_create_of_format(con->server->fb->width, con->server->fb->width, &con->format);
+	mtx_unlock(&con->server->lock);
+
+	if (!con->fb) {
+		trfb_msg("Can not create framebuffer for requested format.");
+		EXIT_THREAD(TRFB_STATE_ERROR);
+	}
+}
+
+static void UpdateRequest(trfb_connection_t *con)
+{
+	unsigned char buf[256];
+	unsigned char incr;
+	unsigned xpos, ypos, width, height;
+
+	trfb_connection_read_all(con, buf, 9);
+	incr = buf[0];
+	xpos = buf[1] * 256 + buf[2];
+	ypos = buf[3] * 256 + buf[4];
+	width = buf[5] * 256 + buf[6];
+	height = buf[7] * 256 + buf[8];
+
+	trfb_msg("I:client requested update: (%d, %d) - (%d, %d)", (int)xpos, (int)ypos, (int)width, (int)height);
+
+	if (!con->fb) {
+		mtx_lock(&con->server->fb->lock);
+		con->fb = trfb_framebuffer_copy(con->server->fb);
+		mtx_unlock(&con->server->fb->lock);
+
+		if (!con->fb) {
+			trfb_msg("Can not copy server framebuffer");
+			EXIT_THREAD(TRFB_STATE_ERROR);
+		}
+	}
+
+	mtx_lock(&con->server->fb->lock);
+	if (trfb_framebuffer_convert(con->fb, con->server->fb)) {
+		mtx_unlock(&con->server->fb->lock);
+		trfb_msg("Can not convert server framebuffer");
+		EXIT_THREAD(TRFB_STATE_ERROR);
+	}
+	mtx_unlock(&con->server->fb->lock);
+
+	if (width > con->fb->width) {
+		width = con->fb->width;
+	}
+
+	if (height > con->fb->height) {
+		height = con->fb->height;
+	}
+
+	if (xpos > width || ypos > height) {
+		trfb_msg("I:Client wants rect out of range. Ignoring...");
+		return;
+	}
+
+	trfb_framebuffer_endian(con->fb, con->format.big_endian);
+
+	/* TODO: send response */
+	buf[0] = 0; /* message type */
+	buf[1] = 0; /* pad */
+	buf[2] = 0;
+	buf[3] = 1; /* 1 rect */
+	buf[4] = xpos / 256;
+	buf[5] = xpos % 256; /* x-position */
+	buf[6] = ypos / 256;
+	buf[7] = ypos % 256; /* y-position */
+	buf[8] = width / 256;
+	buf[9] = width % 256;
+	buf[10] = height / 256;
+	buf[11] = height % 256;
+	buf[12] = 0;
+	buf[13] = 0;
+	buf[14] = 0;
+	buf[15] = 0;
+	trfb_connection_write_all(con, buf, 16);
+
+	trfb_connection_write_all(con, con->server->fb->pixels, con->server->fb->width * con->server->fb->height * (con->server->fb->bpp / 8));
+}
+
+static void KeyEvent(trfb_connection_t *con)
+{
+	unsigned char buf[8];
+	unsigned char down;
+	uint32_t code;
+
+	trfb_connection_read_all(con, buf, 7);
+	down = buf[0];
+	code = (buf[3] << 24) | (buf[4] << 16) | (buf[5] << 8) | buf[6];
+
+	trfb_msg("I:KeyEvent: %d, %08x", down, (int)code);
+}
+
+static void PointerEvent(trfb_connection_t *con)
+{
+	unsigned char buf[5];
+	unsigned char button;
+	uint16_t x, y;
+
+	trfb_connection_read_all(con, buf, 5);
+
+	button = buf[0];
+	x = buf[1] * 256 + buf[2];
+	y = buf[3] * 256 + buf[4];
+
+	trfb_msg("I:PointerEvent: %d (%d, %d)", button, (int)x, (int)y);
+}
+
+static void ClientCutText(trfb_connection_t *con)
+{
+	unsigned char buf[7];
+	unsigned char txt[256];
+	size_t len, pos = 0;
+	size_t l;
+
+	trfb_connection_read_all(con, buf, 7);
+	len = (buf[3] << 24) | (buf[4] << 16) | (buf[5] << 8) | buf[6];
+
+	if (len > sizeof(txt) - 1) {
+		while (pos < len) {
+			l = len - pos;
+			if (l > sizeof(txt))
+				l = sizeof(txt);
+			trfb_connection_read_all(con, txt, l);
+			pos += l;
+		}
+		trfb_msg("I:ClientCutText[%d]", (int)len);
+	} else {
+		trfb_connection_read_all(con, txt, len);
+		txt[len] = 0;
+		trfb_msg("I:ClientCutText(%s)", txt);
 	}
 }
 

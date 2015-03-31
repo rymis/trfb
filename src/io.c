@@ -56,7 +56,7 @@ ssize_t trfb_io_read(trfb_io_t *io, void *buf, ssize_t len, unsigned timeout)
 	l = io->rlen - io->rpos; /* Maximum length to read without I/O */
 	if (l > len)
 		l = len;
-	memcpy(buf, io->rbuf, l);
+	memcpy(buf, io->rbuf + io->rpos, l);
 	io->rpos += l;
 
 	if (io->rpos == io->rlen) { /* End of buffer */

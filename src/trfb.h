@@ -52,7 +52,7 @@ typedef struct trfb_format {
 	unsigned char rshift, gshift, bshift;
 } trfb_format_t;
 
-typedef struct trfb_image {
+typedef struct trfb_framebuffer {
 	mtx_t lock;
 
 	unsigned width, height;
@@ -68,16 +68,106 @@ typedef struct trfb_image {
 	unsigned char rshift, gshift, bshift;
 
 	void *pixels;
-} trfb_image_t;
+} trfb_framebuffer_t;
+
+#define TRFB_FB16_RMASK  0x1f
+#define TRFB_FB16_GMASK  0x3f
+#define TRFB_FB16_BMASK  0x1f
+
+#define TRFB_FB16_RSHIFT 11
+#define TRFB_FB16_GSHIFT  5
+#define TRFB_FB16_BSHIFT  0
+
+#define TRFB_FB32_RMASK  0xff
+#define TRFB_FB32_GMASK  0xff
+#define TRFB_FB32_BMASK  0xff
+
+#define TRFB_FB32_RSHIFT 16
+#define TRFB_FB32_GSHIFT  8
+#define TRFB_FB32_BSHIFT  0
+
+typedef uint32_t trfb_color_t;
+#define TRFB_RGB(r, g, b) (((r) << 16) | ((g) << 8) | (b))
+#define TRFB_COLOR_R(col) (((col) >> TRFB_FB32_RSHIFT) & TRFB_FB32_RMASK)
+#define TRFB_COLOR_G(col) (((col) >> TRFB_FB32_GSHIFT) & TRFB_FB32_GMASK)
+#define TRFB_COLOR_B(col) (((col) >> TRFB_FB32_BSHIFT) & TRFB_FB32_BMASK)
+
+extern const trfb_color_t trfb_framebuffer_pallete[256];
+static inline trfb_color_t trfb_fb_get_pixel(trfb_framebuffer_t *fb, unsigned x, unsigned y)
+{
+	return trfb_framebuffer_pallete[((uint8_t*)fb->pixels)[y * fb->width + x]];
+}
+
+extern const uint8_t trfb_framebuffer_revert_pallete[256];
+static inline void trfb_fb_set_pixel(trfb_framebuffer_t *fb, unsigned x, unsigned y, trfb_color_t col)
+{
+	((uint8_t*)fb->pixels)[y * fb->width + x] =
+		trfb_framebuffer_revert_pallete[TRFB_COLOR_R(col)] * 36 +
+		trfb_framebuffer_revert_pallete[TRFB_COLOR_G(col)] * 6 +
+		trfb_framebuffer_revert_pallete[TRFB_COLOR_B(col)];
+}
+
+static inline trfb_color_t trfb_fb16_get_pixel(trfb_framebuffer_t *fb, unsigned x, unsigned y)
+{
+	register trfb_color_t c = ((uint16_t*)fb->pixels)[y * fb->width + x];
+
+	return TRFB_RGB(
+			(((c >> fb->rshift) << 8) / (fb->rmask + 1)),
+			(((c >> fb->gshift) << 8) / (fb->gmask + 1)),
+			(((c >> fb->bshift) << 8) / (fb->bmask + 1))
+		       );
+}
+
+static inline void trfb_fb16_set_pixel(trfb_framebuffer_t *fb, unsigned x, unsigned y, trfb_color_t col)
+{
+	((uint16_t*)fb->pixels)[y * fb->width + x] =
+		((TRFB_COLOR_R(col) * (fb->rmask + 1) / 256) << fb->rshift) |
+		((TRFB_COLOR_G(col) * (fb->gmask + 1) / 256) << fb->gshift) |
+		((TRFB_COLOR_B(col) * (fb->bmask + 1) / 256) << fb->bshift);
+}
+
+static inline trfb_color_t trfb_fb32_get_pixel(trfb_framebuffer_t *fb, unsigned x, unsigned y)
+{
+	trfb_color_t c = ((uint32_t*)fb->pixels)[y * fb->width + x];
+	return TRFB_RGB(
+			((c >> fb->rshift) & fb->rmask),
+			((c >> fb->gshift) & fb->gmask),
+			((c >> fb->bshift) & fb->bmask));
+}
+
+static inline void trfb_fb32_set_pixel(trfb_framebuffer_t *fb, unsigned x, unsigned y, trfb_color_t col)
+{
+	((uint32_t*)fb->pixels)[y * fb->width + x] =
+		(TRFB_COLOR_R(col) << fb->rshift) |
+		(TRFB_COLOR_G(col) << fb->gshift) |
+		(TRFB_COLOR_B(col) << fb->bshift);
+}
+
+static inline trfb_color_t trfb_framebuffer_get_pixel(trfb_framebuffer_t *fb, unsigned x, unsigned y)
+{
+	if (fb->bpp == 8)
+		return trfb_fb_get_pixel(fb, x, y);
+	else if (fb->bpp == 16)
+		return trfb_fb16_get_pixel(fb, x, y);
+	else if (fb->bpp == 32)
+		return trfb_fb32_get_pixel(fb, x, y);
+	return 0;
+}
+
+static inline void trfb_framebuffer_set_pixel(trfb_framebuffer_t *fb, unsigned x, unsigned y, trfb_color_t col)
+{
+	if (fb->bpp == 8)
+		trfb_fb_set_pixel(fb, x, y, col);
+	else if (fb->bpp == 16)
+		trfb_fb16_set_pixel(fb, x, y, col);
+	else if (fb->bpp == 32)
+		trfb_fb32_set_pixel(fb, x, y, col);
+	return;
+}
 
 typedef struct trfb_client trfb_client_t;
 typedef struct trfb_server trfb_server_t;
 typedef struct trfb_connection trfb_connection_t;
-
-typedef uint32_t trfb_color_t;
-#define TRFB_RMASK 0x0FF0000
-#define TRFB_GMASK 0x000FF00
-#define TRFB_BMASK 0x00000FF
 
 struct trfb_server {
 	int sock;
@@ -89,9 +179,7 @@ struct trfb_server {
 #define TRFB_STATE_ERROR    0x8000
 	unsigned state;
 
-	size_t width, height;
-	/* Pixels array. Always true-color 3 bytes per-pixel. */
-	trfb_color_t *pixels;
+	trfb_framebuffer_t *fb;
 
 	mtx_t lock;
 
@@ -120,7 +208,8 @@ struct trfb_connection {
 	 * Array of pixels. Last state for this client.
 	 * Width and height are taken from server
 	 */
-	unsigned char *pixels;
+	trfb_framebuffer_t *fb;
+	trfb_format_t format;
 
 	trfb_io_t *io;
 
@@ -181,6 +270,15 @@ int trfb_io_fputc(unsigned char c, trfb_io_t *io, unsigned timeout);
 
 #define trfb_io_getc(io, timeout) (((io)->rpos < (io)->rlen)? (io)->rbuf[(io)->rpos++]: trfb_io_fgetc(io, timeout))
 #define trfb_io_putc(c, io, timeout) (((io)->wlen < TRFB_BUFSIZ)? ((io)->wbuf[(io)->wlen++] = (c)): trfb_io_fputc(c, io, timeout))
+
+trfb_framebuffer_t* trfb_framebuffer_create(unsigned width, unsigned height, unsigned char bpp);
+trfb_framebuffer_t* trfb_framebuffer_create_of_format(unsigned width, unsigned height, trfb_format_t *fmt);
+void trfb_framebuffer_free(trfb_framebuffer_t *fb);
+int trfb_framebuffer_resize(trfb_framebuffer_t *fb, unsigned width, unsigned height);
+int trfb_framebuffer_convert(trfb_framebuffer_t *dst, trfb_framebuffer_t *src);
+int trfb_framebuffer_format(trfb_framebuffer_t *fb, trfb_format_t *fmt);
+void trfb_framebuffer_endian(trfb_framebuffer_t *fb, int is_be);
+trfb_framebuffer_t* trfb_framebuffer_copy(trfb_framebuffer_t *fb);
 
 /* extern "C" { */
 #ifdef __cplusplus

@@ -21,11 +21,9 @@ trfb_server_t *trfb_server_create(size_t width, size_t height)
 
 	S->sock = -1;
 	S->state = TRFB_STATE_STOPPED;
-	S->width = width;
-	S->height = height;
-	S->pixels = calloc(width * height, sizeof(uint32_t));
-	if (!S->pixels) {
-		trfb_msg("Not enought memory");
+	S->fb = trfb_framebuffer_create(width, height, 32);
+	if (!S->fb) {
+		trfb_msg("Can't create framebuffer");
 		free(S);
 		return NULL;
 	}
@@ -44,7 +42,7 @@ void trfb_server_destroy(trfb_server_t *server)
 	}
 
 	close(server->sock);
-	free(server->pixels);
+	trfb_framebuffer_free(server->fb);
 
 	/* TODO: remove all clients */
 

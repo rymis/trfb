@@ -21,7 +21,7 @@ int trfb_server_start(trfb_server_t *srv)
 	}
 	mtx_unlock(&srv->lock);
 
-	if (!srv->pixels || !srv->width || !srv->height || srv->sock < 0) {
+	if (!srv->fb || srv->sock < 0) {
 		trfb_msg("Server parameters is not set. Invalid trfb_server content.");
 		return -1;
 	}
