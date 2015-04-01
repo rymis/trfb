@@ -247,7 +247,9 @@ static int connection(void *con_in)
 		}
 
 		if (l == 1) {
+#if EXTRA_DEBUG
 			trfb_msg("I:message[%d]", type);
+#endif
 
 			for (i = 0; msg_types[i].process; i++)
 				if (msg_types[i].type == type)
@@ -418,9 +420,9 @@ static void SetPixelFormat(trfb_connection_t *con)
 
 	if (con->fb)
 		trfb_framebuffer_free(con->fb);
-	mtx_lock(&con->server->lock);
+	trfb_server_lock_fb(con->server, 0);
 	con->fb = trfb_framebuffer_create_of_format(con->server->fb->width, con->server->fb->width, &con->format);
-	mtx_unlock(&con->server->lock);
+	trfb_server_unlock_fb(con->server);
 
 	if (!con->fb) {
 		trfb_msg("Can not create framebuffer for requested format.");
@@ -441,12 +443,14 @@ static void UpdateRequest(trfb_connection_t *con)
 	width = buf[5] * 256 + buf[6];
 	height = buf[7] * 256 + buf[8];
 
+#if EXTRA_DEBUG
 	trfb_msg("I:client requested update: (%d, %d) - (%d, %d)", (int)xpos, (int)ypos, (int)width, (int)height);
+#endif
 
 	if (!con->fb) {
-		mtx_lock(&con->server->fb->lock);
+		trfb_server_lock_fb(con->server, 0);
 		con->fb = trfb_framebuffer_copy(con->server->fb);
-		mtx_unlock(&con->server->fb->lock);
+		trfb_server_unlock_fb(con->server);
 
 		if (!con->fb) {
 			trfb_msg("Can not copy server framebuffer");
@@ -454,13 +458,13 @@ static void UpdateRequest(trfb_connection_t *con)
 		}
 	}
 
-	mtx_lock(&con->server->fb->lock);
+	trfb_server_lock_fb(con->server, 0);
 	if (trfb_framebuffer_convert(con->fb, con->server->fb)) {
-		mtx_unlock(&con->server->fb->lock);
+		trfb_server_unlock_fb(con->server);
 		trfb_msg("Can not convert server framebuffer");
 		EXIT_THREAD(TRFB_STATE_ERROR);
 	}
-	mtx_unlock(&con->server->fb->lock);
+	trfb_server_unlock_fb(con->server);
 
 	if (width > con->fb->width) {
 		width = con->fb->width;
@@ -504,52 +508,51 @@ static void KeyEvent(trfb_connection_t *con)
 	unsigned char buf[8];
 	unsigned char down;
 	uint32_t code;
+	trfb_event_t event;
 
 	trfb_connection_read_all(con, buf, 7);
 	down = buf[0];
 	code = (buf[3] << 24) | (buf[4] << 16) | (buf[5] << 8) | buf[6];
 
-	trfb_msg("I:KeyEvent: %d, %08x", down, (int)code);
+	event.type = TRFB_EVENT_KEY;
+	event.event.key.down = down;
+	event.event.key.code = code;
+
+	trfb_server_add_event(con->server, &event);
 }
 
 static void PointerEvent(trfb_connection_t *con)
 {
 	unsigned char buf[5];
-	unsigned char button;
-	uint16_t x, y;
+	trfb_event_t event;
 
 	trfb_connection_read_all(con, buf, 5);
 
-	button = buf[0];
-	x = buf[1] * 256 + buf[2];
-	y = buf[3] * 256 + buf[4];
+	event.event.pointer.button = buf[0];
+	event.event.pointer.x = buf[1] * 256 + buf[2];
+	event.event.pointer.y = buf[3] * 256 + buf[4];
+	event.type = TRFB_EVENT_POINTER;
 
-	trfb_msg("I:PointerEvent: %d (%d, %d)", button, (int)x, (int)y);
+	trfb_server_add_event(con->server, &event);
 }
 
 static void ClientCutText(trfb_connection_t *con)
 {
 	unsigned char buf[7];
-	unsigned char txt[256];
-	size_t len, pos = 0;
-	size_t l;
+	trfb_event_t event;
 
 	trfb_connection_read_all(con, buf, 7);
-	len = (buf[3] << 24) | (buf[4] << 16) | (buf[5] << 8) | buf[6];
-
-	if (len > sizeof(txt) - 1) {
-		while (pos < len) {
-			l = len - pos;
-			if (l > sizeof(txt))
-				l = sizeof(txt);
-			trfb_connection_read_all(con, txt, l);
-			pos += l;
-		}
-		trfb_msg("I:ClientCutText[%d]", (int)len);
-	} else {
-		trfb_connection_read_all(con, txt, len);
-		txt[len] = 0;
-		trfb_msg("I:ClientCutText(%s)", txt);
+	event.type = TRFB_EVENT_CUT_TEXT;
+	event.event.cut_text.len = (buf[3] << 24) | (buf[4] << 16) | (buf[5] << 8) | buf[6];
+	event.event.cut_text.text = malloc(event.event.cut_text.len + 1);
+	if (!event.event.cut_text.text) {
+		trfb_msg("Not enought memory");
+		EXIT_THREAD(TRFB_STATE_ERROR);
 	}
+
+	/* WARNING: this could cause memory leak. This is very so bad and we need to find an solution. */
+	trfb_connection_read_all(con, event.event.cut_text.text, event.event.cut_text.len);
+
+	trfb_server_add_event(con->server, &event);
 }
 

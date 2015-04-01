@@ -3,41 +3,12 @@
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
+#include <signal.h>
 
-int split_words(char *s, int *argc, const char **argv)
+static int quit_now = 0;
+static void sigint(int sig)
 {
-	int l = strlen(s);
-	int arglen = *argc;
-	int i = 0;
-	int acnt = 0;
-
-	for (;;) {
-		while (s[i] && isspace(s[i]))
-			i++;
-
-		if (!s[i])
-			break;
-
-		if (acnt >= arglen) {
-			fprintf(stderr, "Error: too much arguments!\n");
-			return -1;
-		}
-
-		argv[acnt++] = s + i;
-		while (s[i] && !isspace(s[i]))
-			i++;
-		
-		if (!s[i]) {
-			break;
-		} else {
-			s[i] = 0;
-			++i;
-		}
-	}
-
-	*argc = acnt;
-
-	return 0;
+	quit_now = 1;
 }
 
 int main(int argc, char *argv[])
@@ -47,6 +18,9 @@ int main(int argc, char *argv[])
 	int ac;
 	const char* av[32];
 	unsigned i, j, di = 0;
+	trfb_event_t event;
+
+	signal(SIGINT, sigint);
 
 	srv = trfb_server_create(640, 480, 4);
 	if (!srv) {
@@ -72,31 +46,26 @@ int main(int argc, char *argv[])
 			}
 		}
 		trfb_server_unlock_fb(srv);
-		di = (di + 10) % 256;
+		// di = (di + 10) % 256;
 
-		if (!fgets(buf, sizeof(buf), stdin)) {
-			strcpy(buf, "exit");
+		while (trfb_server_poll_event(srv, &event)) {
+			if (event.type == TRFB_EVENT_KEY && (
+						event.event.key.code == 'q' ||
+						event.event.key.code == 'Q' ||
+						event.event.key.code == 0xff1b)) {
+				quit_now = 1;
+			}
+			printf("EVENT: %d\n", event.type);
+			trfb_event_clear(&event);
 		}
 
-		ac = sizeof(av) / sizeof(av[0]);
-		if (split_words(buf, &ac, av)) {
-			fprintf(stderr, "Error: can't parse commands\n");
-		}
-
-		if (ac == 0)
-			continue;
-
-		if (!strcmp(av[0], "exit") || !strcmp(av[0], "quit")) {
-			/* EXIT! */
+		if (quit_now) {
 			trfb_server_stop(srv);
 			trfb_server_destroy(srv);
 			exit(0);
-		} else {
-			int i;
-			printf("%s:\n", av[0]);
-			for (i = 1; i < ac; i++)
-				printf("\t%s\n", av[i]);
 		}
+
+		usleep(1000);
 	}
 
 	return 0;

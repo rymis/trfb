@@ -1,5 +1,12 @@
 #include "webcam/webcam.h"
 #include <trfb.h>
+#include <signal.h>
+
+static int quit_now = 0;
+static void sigint(int sig)
+{
+	quit_now = 1;
+}
 
 static void draw_image(webcam_t *cam, buffer_t *frame, trfb_server_t *srv)
 {
@@ -18,6 +25,9 @@ int main(int argc, char *argv[])
 	buffer_t frame = { NULL, 0 };
 	const unsigned width = 640;
 	const unsigned height = 480;
+	trfb_event_t event;
+
+	signal(SIGINT, sigint);
 
 	cam = webcam_open("/dev/video0");
 	if (!cam) {
@@ -44,13 +54,32 @@ int main(int argc, char *argv[])
 
 	webcam_stream(cam, true);
 	for (;;) {
-		webcam_grab(cam, &frame);
+		if (trfb_server_updated(srv)) {
+			webcam_grab(cam, &frame);
 
-		if (frame.length > 0) {
-			draw_image(cam, &frame, srv);
+			if (frame.length > 0) {
+				draw_image(cam, &frame, srv);
+			}
 		}
 
-		/* TODO: wait for event */
+		while (trfb_server_poll_event(srv, &event)) {
+			if (event.type == TRFB_EVENT_KEY && (
+						event.event.key.code == 'q' ||
+						event.event.key.code == 'Q' ||
+						event.event.key.code == 0xff1b)) {
+				quit_now = 1;
+			}
+			printf("EVENT: %d\n", event.type);
+			trfb_event_clear(&event);
+		}
+
+		if (quit_now) {
+			trfb_server_stop(srv);
+			trfb_server_destroy(srv);
+			exit(0);
+		}
+
+		usleep(1000);
 		/* TODO: wait for update */
 	}
 	webcam_stream(cam, false);

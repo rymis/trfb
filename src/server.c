@@ -3,6 +3,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <stdio.h>
+#include <string.h>
 
 static int server(void *srv_in);
 
@@ -237,5 +238,89 @@ int trfb_server_unlock_fb(trfb_server_t *srv)
 	if (!srv || !srv->fb)
 		return -1;
 	mtx_unlock(&srv->fb->lock);
+}
+
+int trfb_server_add_event(trfb_server_t *srv, trfb_event_t *event)
+{
+	if (!srv || !event) {
+		return -1;
+	}
+
+	mtx_lock(&srv->lock);
+	if (srv->event_len >= TRFB_EVENTS_QUEUE_LEN) {
+		mtx_unlock(&srv->lock);
+		return -1;
+	}
+
+	if (trfb_event_move(srv->events + ((srv->event_cur + srv->event_len) % TRFB_EVENTS_QUEUE_LEN), event)) {
+		mtx_unlock(&srv->lock);
+		return -1;
+	}
+
+	srv->event_len++;
+	mtx_unlock(&srv->lock);
+
+	return 0;
+}
+
+int trfb_server_poll_event(trfb_server_t *srv, trfb_event_t *event)
+{
+	if (!srv || !event) {
+		return 0;
+	}
+
+	mtx_lock(&srv->lock);
+	if (srv->event_len == 0) {
+		mtx_unlock(&srv->lock);
+		return 0;
+	}
+
+	if (trfb_event_move(event, srv->events + srv->event_cur)) {
+		mtx_unlock(&srv->lock);
+		return 0;
+	}
+
+	srv->event_cur = (srv->event_cur + 1) % TRFB_EVENTS_QUEUE_LEN;
+	srv->event_len--;
+
+	mtx_unlock(&srv->lock);
+
+	return 1;
+}
+
+void trfb_event_clear(trfb_event_t *event)
+{
+	if (!event)
+		return;
+	if (event->type == TRFB_EVENT_CUT_TEXT)
+		free(event->event.cut_text.text);
+	memset(event, 0, sizeof(trfb_event_t));
+}
+
+int trfb_event_move(trfb_event_t *dst, trfb_event_t *src)
+{
+	if (!dst || !src)
+		return -1;
+
+	memcpy(dst, src, sizeof(trfb_event_t));
+	memset(src, 0, sizeof(trfb_event_t));
+
+	return 0;
+}
+
+unsigned trfb_server_updated(trfb_server_t *srv)
+{
+	unsigned r;
+
+	if (!srv) {
+		trfb_msg("Invalid argument!");
+		return 0;
+	}
+
+	mtx_lock(&srv->fb->lock);
+	r = srv->updated;
+	mtx_unlock(&srv->fb->lock);
+
+	return r;
 }
 

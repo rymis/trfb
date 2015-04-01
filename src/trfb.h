@@ -193,6 +193,33 @@ typedef struct trfb_client trfb_client_t;
 typedef struct trfb_server trfb_server_t;
 typedef struct trfb_connection trfb_connection_t;
 
+typedef enum trfb_event_type {
+	TRFB_EVENT_NONE = 0,
+	TRFB_EVENT_KEY,
+	TRFB_EVENT_POINTER,
+	TRFB_EVENT_CUT_TEXT
+} trfb_event_type_t;
+
+typedef struct trfb_event {
+	trfb_event_type_t type;
+	union {
+		struct trfb_event_key {
+			unsigned char down;
+			uint32_t code;
+		} key;
+
+		struct trfb_event_pointer {
+			unsigned char button;
+			unsigned x, y;
+		} pointer;
+
+		struct trfb_event_cut_text {
+			size_t len;
+			char *text;
+		} cut_text;
+	} event;
+} trfb_event_t;
+
 struct trfb_server {
 	int sock;
 	thrd_t thread;
@@ -208,10 +235,11 @@ struct trfb_server {
 
 	mtx_t lock;
 
-	// struct tv changed; /* last changed */
-	// struct tv last_access;
-
 	trfb_connection_t *clients;
+
+#define TRFB_EVENTS_QUEUE_LEN 128
+	trfb_event_t events[TRFB_EVENTS_QUEUE_LEN];
+	unsigned event_cur, event_len;
 };
 
 struct trfb_connection {
@@ -249,6 +277,15 @@ unsigned trfb_server_get_state(trfb_server_t *S);
 
 int trfb_server_lock_fb(trfb_server_t *srv, int w);
 int trfb_server_unlock_fb(trfb_server_t *srv);
+
+int trfb_server_add_event(trfb_server_t *srv, trfb_event_t *event);
+/* poll_event returns 1 on success and 0 if there is no events or error */
+int trfb_server_poll_event(trfb_server_t *srv, trfb_event_t *event);
+void trfb_event_clear(trfb_event_t *event);
+/* Function copies src to dst and frees src so it is move operation */
+int trfb_event_move(trfb_event_t *dst, trfb_event_t *src);
+
+unsigned trfb_server_updated(trfb_server_t *srv);
 
 /* Set socket to listen: */
 int trfb_server_set_socket(trfb_server_t *server, int sock);
