@@ -42,7 +42,7 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	if (trfb_server_bind(srv, argc > 1? argv[0]: "localhost", "5913")) {
+	if (trfb_server_bind(srv, argc > 1? argv[1]: "localhost", "5913")) {
 		fprintf(stderr, "Error: can't bind!\n");
 		return 1;
 	}
