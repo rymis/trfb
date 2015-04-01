@@ -1,6 +1,8 @@
-#include "webcam/webcam.h"
 #include <trfb.h>
 #include <signal.h>
+#include <string.h>
+
+#include "lwebcam/lwebcam.h"
 
 static int quit_now = 0;
 static void sigint(int sig)
@@ -8,12 +10,28 @@ static void sigint(int sig)
 	quit_now = 1;
 }
 
-static void draw_image(webcam_t *cam, buffer_t *frame, trfb_server_t *srv)
+static void draw_image(struct webcam *cam, trfb_server_t *srv)
 {
-	trfb_server_lock_fb(srv, 1);
+	unsigned x, y;
+	unsigned W = cam->width * 3;
+	unsigned sW;
+	unsigned off;
+	uint32_t *pixels;
 
-	if (srv->fb->width * srv->fb->height * srv->fb->bpp >= frame->length)
-		memcpy(srv->fb->pixels, frame->start, frame->length);
+	trfb_server_lock_fb(srv, 1);
+	pixels = srv->fb->pixels;
+	sW = srv->fb->width;
+
+	for (y = 0; y < cam->height; y++) {
+		for (x = 0; x < cam->width; x++) {
+			off = W * y + x;
+			pixels[y * sW + x] = TRFB_RGB(
+						cam->img_data[off],
+						cam->img_data[off + 1],
+						cam->img_data[off + 2]
+						);
+		}
+	}
 
 	trfb_server_unlock_fb(srv);
 }
@@ -21,20 +39,18 @@ static void draw_image(webcam_t *cam, buffer_t *frame, trfb_server_t *srv)
 int main(int argc, char *argv[])
 {
 	trfb_server_t *srv;
-	webcam_t *cam;
-	buffer_t frame = { NULL, 0 };
+	struct webcam *cam;
 	const unsigned width = 640;
 	const unsigned height = 480;
 	trfb_event_t event;
 
 	signal(SIGINT, sigint);
 
-	cam = webcam_open("/dev/video0");
+	cam = webcam_open("/dev/video0", WEBCAM_IO_METHOD_READ, width, height);
 	if (!cam) {
 		fprintf(stderr, "Error: can't open webcam!\n");
 		return 1;
 	}
-	webcam_resize(cam, width, height);
 
 	srv = trfb_server_create(width, height, 4);
 	if (!srv) {
@@ -52,13 +68,11 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	webcam_stream(cam, true);
+	webcam_start_capturing(cam);
 	for (;;) {
 		if (trfb_server_updated(srv)) {
-			webcam_grab(cam, &frame);
-
-			if (frame.length > 0) {
-				draw_image(cam, &frame, srv);
+			if (webcam_wait_frame(cam, 1) > 0) {
+				draw_image(cam, srv);
 			}
 		}
 
@@ -82,7 +96,8 @@ int main(int argc, char *argv[])
 		usleep(1000);
 		/* TODO: wait for update */
 	}
-	webcam_stream(cam, false);
+	webcam_stop_capturing(cam);
+	webcam_close(cam);
 	trfb_server_stop(srv);
 	trfb_server_free(srv);
 
