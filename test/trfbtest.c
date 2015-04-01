@@ -1,4 +1,4 @@
-#include "trfb.h"
+#include <trfb.h>
 #include <c11threads.h>
 #include <ctype.h>
 #include <stdio.h>
