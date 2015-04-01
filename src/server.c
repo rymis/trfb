@@ -220,3 +220,22 @@ static void stop_all_connections(trfb_server_t *srv)
 	return;
 }
 
+int trfb_server_lock_fb(trfb_server_t *srv, int w)
+{
+	if (!srv || !srv->fb)
+		return -1;
+	mtx_lock(&srv->fb->lock);
+	if (w) {
+		srv->updated = 0;
+	} else {
+		srv->updated++;
+	}
+}
+
+int trfb_server_unlock_fb(trfb_server_t *srv)
+{
+	if (!srv || !srv->fb)
+		return -1;
+	mtx_unlock(&srv->fb->lock);
+}
+

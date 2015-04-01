@@ -57,8 +57,8 @@ typedef struct trfb_framebuffer {
 
 	unsigned width, height;
 	/**
-	 * Bits per pixel. Supported values are:
-	 *   8 - and in this case this is 256-color image
+	 * Bytes per pixel. Supported values are:
+	 *   8 - and in this case this is 256-color image. If rmask == 0 library will use pallete in other cases it is TrueColor
 	 *   16 - pixels is uint16_t*
 	 *   32 - pixels is uint32_t*
 	 */
@@ -107,6 +107,25 @@ static inline void trfb_fb_set_pixel(trfb_framebuffer_t *fb, unsigned x, unsigne
 		trfb_framebuffer_revert_pallete[TRFB_COLOR_B(col)];
 }
 
+static inline trfb_color_t trfb_fb8_get_pixel(trfb_framebuffer_t *fb, unsigned x, unsigned y)
+{
+	register trfb_color_t c = ((uint8_t*)fb->pixels)[y * fb->width + x];
+	
+	return TRFB_RGB(
+			(((c >> fb->rshift) << 8) / (fb->rmask + 1)),
+			(((c >> fb->gshift) << 8) / (fb->gmask + 1)),
+			(((c >> fb->bshift) << 8) / (fb->bmask + 1))
+		       );
+}
+
+static inline void trfb_fb8_set_pixel(trfb_framebuffer_t *fb, unsigned x, unsigned y, trfb_color_t col)
+{
+	((uint8_t*)fb->pixels)[y * fb->width + x] =
+		((TRFB_COLOR_R(col) * (fb->rmask + 1) / 256) << fb->rshift) |
+		((TRFB_COLOR_G(col) * (fb->gmask + 1) / 256) << fb->gshift) |
+		((TRFB_COLOR_B(col) * (fb->bmask + 1) / 256) << fb->bshift);
+}
+
 static inline trfb_color_t trfb_fb16_get_pixel(trfb_framebuffer_t *fb, unsigned x, unsigned y)
 {
 	register trfb_color_t c = ((uint16_t*)fb->pixels)[y * fb->width + x];
@@ -145,22 +164,27 @@ static inline void trfb_fb32_set_pixel(trfb_framebuffer_t *fb, unsigned x, unsig
 
 static inline trfb_color_t trfb_framebuffer_get_pixel(trfb_framebuffer_t *fb, unsigned x, unsigned y)
 {
-	if (fb->bpp == 8)
-		return trfb_fb_get_pixel(fb, x, y);
-	else if (fb->bpp == 16)
+	if (fb->bpp == 1) {
+		if (fb->rmask) {
+			return trfb_fb8_get_pixel(fb, x, y);
+		} else {
+			return trfb_fb_get_pixel(fb, x, y);
+		}
+	} else if (fb->bpp == 2) {
 		return trfb_fb16_get_pixel(fb, x, y);
-	else if (fb->bpp == 32)
+	} else if (fb->bpp == 4) {
 		return trfb_fb32_get_pixel(fb, x, y);
+	}
 	return 0;
 }
 
 static inline void trfb_framebuffer_set_pixel(trfb_framebuffer_t *fb, unsigned x, unsigned y, trfb_color_t col)
 {
-	if (fb->bpp == 8)
+	if (fb->bpp == 1)
 		trfb_fb_set_pixel(fb, x, y, col);
-	else if (fb->bpp == 16)
+	else if (fb->bpp == 2)
 		trfb_fb16_set_pixel(fb, x, y, col);
-	else if (fb->bpp == 32)
+	else if (fb->bpp == 4)
 		trfb_fb32_set_pixel(fb, x, y, col);
 	return;
 }
@@ -180,6 +204,7 @@ struct trfb_server {
 	unsigned state;
 
 	trfb_framebuffer_t *fb;
+	unsigned updated;
 
 	mtx_t lock;
 
@@ -216,11 +241,14 @@ struct trfb_connection {
 	trfb_connection_t *next;
 };
 
-trfb_server_t *trfb_server_create(size_t width, size_t height);
+trfb_server_t *trfb_server_create(size_t width, size_t height, unsigned bpp);
 void trfb_server_destroy(trfb_server_t *server);
 int trfb_server_start(trfb_server_t *server);
 int trfb_server_stop(trfb_server_t *server);
 unsigned trfb_server_get_state(trfb_server_t *S);
+
+int trfb_server_lock_fb(trfb_server_t *srv, int w);
+int trfb_server_unlock_fb(trfb_server_t *srv);
 
 /* Set socket to listen: */
 int trfb_server_set_socket(trfb_server_t *server, int sock);

@@ -496,7 +496,7 @@ static void UpdateRequest(trfb_connection_t *con)
 	buf[15] = 0;
 	trfb_connection_write_all(con, buf, 16);
 
-	trfb_connection_write_all(con, con->server->fb->pixels, con->server->fb->width * con->server->fb->height * (con->server->fb->bpp / 8));
+	trfb_connection_write_all(con, con->fb->pixels, con->fb->width * con->fb->height * con->fb->bpp);
 }
 
 static void KeyEvent(trfb_connection_t *con)

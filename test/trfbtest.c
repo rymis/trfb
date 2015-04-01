@@ -48,7 +48,7 @@ int main(int argc, char *argv[])
 	const char* av[32];
 	unsigned i, j, di = 0;
 
-	srv = trfb_server_create(640, 480);
+	srv = trfb_server_create(640, 480, 4);
 	if (!srv) {
 		fprintf(stderr, "Error: can't create server!\n");
 		return 1;
@@ -65,11 +65,13 @@ int main(int argc, char *argv[])
 	}
 
 	for (;;) {
+		trfb_server_lock_fb(srv, 1);
 		for (i = 0; i < 256; i++) {
 			for (j = 0; j < 256; j++) {
 				trfb_framebuffer_set_pixel(srv->fb, (i + di) % 256, j, TRFB_RGB(i, j, 100));
 			}
 		}
+		trfb_server_unlock_fb(srv);
 		di = (di + 10) % 256;
 
 		if (!fgets(buf, sizeof(buf), stdin)) {

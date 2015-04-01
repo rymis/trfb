@@ -5,7 +5,7 @@
 #include <sys/socket.h>
 #include <netdb.h>
 
-trfb_server_t *trfb_server_create(size_t width, size_t height)
+trfb_server_t *trfb_server_create(size_t width, size_t height, unsigned bpp)
 {
 	trfb_server_t *S;
 
@@ -21,7 +21,7 @@ trfb_server_t *trfb_server_create(size_t width, size_t height)
 
 	S->sock = -1;
 	S->state = TRFB_STATE_STOPPED;
-	S->fb = trfb_framebuffer_create(width, height, 32);
+	S->fb = trfb_framebuffer_create(width, height, bpp);
 	if (!S->fb) {
 		trfb_msg("Can't create framebuffer");
 		free(S);
