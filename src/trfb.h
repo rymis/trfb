@@ -58,17 +58,40 @@ typedef struct trfb_framebuffer {
 	unsigned width, height;
 	/**
 	 * Bytes per pixel. Supported values are:
-	 *   8 - and in this case this is 256-color image. If rmask == 0 library will use pallete in other cases it is TrueColor
-	 *   16 - pixels is uint16_t*
-	 *   32 - pixels is uint32_t*
+	 *   1 - and in this case this is 256-color image.
+	 *   2 - pixels is uint16_t*
+	 *   4 - pixels is uint32_t*
 	 */
 	unsigned char bpp;
 
 	uint32_t rmask, gmask, bmask;
 	unsigned char rshift, gshift, bshift;
+	unsigned char rnorm, gnorm, bnorm;
+
+	/* To get actual pixel you need to:
+	 * 1. Determine pixel type (uint8_t, uint16_t or uint32_t) looking at bpp
+	 * 2. get pixel: trfb_color_t pixel = ((type_t*)pixels)[y * width + x];
+	 * 3. Get components. For example: r = ((pixel >> rshift) & rmask) << rnorm;
+	 * 4. Get color: color = TRFB_RGB(r, g, b);
+	 * To set actual pixel you need to:
+	 * 1. Determine pixel type (uint8_t, uint16_t or uint32_t) looking at bpp
+	 * 2. Get pixel value: trfb_color_t pixel = (((r >> rnorm) & rmask) << rshift) |
+	 *                                          (((g >> gnorm) & gmask) << gshift) |
+	 *                                          (((b >> bnorm) & bmask) << bshift);
+	 * 3. Set pixel value: ((type_t*)pixels)[y * width + x] = pixel;
+	 */
 
 	void *pixels;
 } trfb_framebuffer_t;
+
+/* FB8 is BGR233 format: */
+#define TRFB_FB8_RMASK  0x07
+#define TRFB_FB8_GMASK  0x07
+#define TRFB_FB8_BMASK  0x03
+
+#define TRFB_FB8_RSHIFT  0
+#define TRFB_FB8_GSHIFT  3
+#define TRFB_FB8_BSHIFT  6
 
 #define TRFB_FB16_RMASK  0x1f
 #define TRFB_FB16_GMASK  0x3f
@@ -92,84 +115,34 @@ typedef uint32_t trfb_color_t;
 #define TRFB_COLOR_G(col) (((col) >> TRFB_FB32_GSHIFT) & TRFB_FB32_GMASK)
 #define TRFB_COLOR_B(col) (((col) >> TRFB_FB32_BSHIFT) & TRFB_FB32_BMASK)
 
-extern const trfb_color_t trfb_framebuffer_pallete[256];
-static inline trfb_color_t trfb_fb_get_pixel(trfb_framebuffer_t *fb, unsigned x, unsigned y)
-{
-	return trfb_framebuffer_pallete[((uint8_t*)fb->pixels)[y * fb->width + x]];
+#define TRFB_PIXEL_FUNCTIONS(bits) \
+static inline trfb_color_t trfb_fb##bits##_get_pixel(trfb_framebuffer_t *fb, unsigned x, unsigned y) \
+{ \
+	register trfb_color_t c = ((uint##bits##_t*)fb->pixels)[y * fb->width + x]; \
+ \
+	return TRFB_RGB( \
+			((c >> fb->rshift) & fb->rmask) << fb->rnorm, \
+			((c >> fb->gshift) & fb->gmask) << fb->gnorm, \
+			((c >> fb->bshift) & fb->bmask) << fb->bnorm \
+		       ); \
+} \
+ \
+static inline void trfb_fb##bits##_set_pixel(trfb_framebuffer_t *fb, unsigned x, unsigned y, trfb_color_t col) \
+{ \
+	((uint##bits##_t*)fb->pixels)[y * fb->width + x] = \
+		(((TRFB_COLOR_R(col) >> fb->rnorm) & fb->rmask) << fb->rshift) | \
+		(((TRFB_COLOR_G(col) >> fb->gnorm) & fb->gmask) << fb->gshift) | \
+		(((TRFB_COLOR_B(col) >> fb->bnorm) & fb->bmask) << fb->bshift); \
 }
 
-extern const uint8_t trfb_framebuffer_revert_pallete[256];
-static inline void trfb_fb_set_pixel(trfb_framebuffer_t *fb, unsigned x, unsigned y, trfb_color_t col)
-{
-	((uint8_t*)fb->pixels)[y * fb->width + x] =
-		trfb_framebuffer_revert_pallete[TRFB_COLOR_R(col)] * 36 +
-		trfb_framebuffer_revert_pallete[TRFB_COLOR_G(col)] * 6 +
-		trfb_framebuffer_revert_pallete[TRFB_COLOR_B(col)];
-}
-
-static inline trfb_color_t trfb_fb8_get_pixel(trfb_framebuffer_t *fb, unsigned x, unsigned y)
-{
-	register trfb_color_t c = ((uint8_t*)fb->pixels)[y * fb->width + x];
-	
-	return TRFB_RGB(
-			(((c >> fb->rshift) << 8) / (fb->rmask + 1)),
-			(((c >> fb->gshift) << 8) / (fb->gmask + 1)),
-			(((c >> fb->bshift) << 8) / (fb->bmask + 1))
-		       );
-}
-
-static inline void trfb_fb8_set_pixel(trfb_framebuffer_t *fb, unsigned x, unsigned y, trfb_color_t col)
-{
-	((uint8_t*)fb->pixels)[y * fb->width + x] =
-		((TRFB_COLOR_R(col) * (fb->rmask + 1) / 256) << fb->rshift) |
-		((TRFB_COLOR_G(col) * (fb->gmask + 1) / 256) << fb->gshift) |
-		((TRFB_COLOR_B(col) * (fb->bmask + 1) / 256) << fb->bshift);
-}
-
-static inline trfb_color_t trfb_fb16_get_pixel(trfb_framebuffer_t *fb, unsigned x, unsigned y)
-{
-	register trfb_color_t c = ((uint16_t*)fb->pixels)[y * fb->width + x];
-
-	return TRFB_RGB(
-			(((c >> fb->rshift) << 8) / (fb->rmask + 1)),
-			(((c >> fb->gshift) << 8) / (fb->gmask + 1)),
-			(((c >> fb->bshift) << 8) / (fb->bmask + 1))
-		       );
-}
-
-static inline void trfb_fb16_set_pixel(trfb_framebuffer_t *fb, unsigned x, unsigned y, trfb_color_t col)
-{
-	((uint16_t*)fb->pixels)[y * fb->width + x] =
-		((TRFB_COLOR_R(col) * (fb->rmask + 1) / 256) << fb->rshift) |
-		((TRFB_COLOR_G(col) * (fb->gmask + 1) / 256) << fb->gshift) |
-		((TRFB_COLOR_B(col) * (fb->bmask + 1) / 256) << fb->bshift);
-}
-
-static inline trfb_color_t trfb_fb32_get_pixel(trfb_framebuffer_t *fb, unsigned x, unsigned y)
-{
-	trfb_color_t c = ((uint32_t*)fb->pixels)[y * fb->width + x];
-	return TRFB_RGB(
-			((c >> fb->rshift) & fb->rmask),
-			((c >> fb->gshift) & fb->gmask),
-			((c >> fb->bshift) & fb->bmask));
-}
-
-static inline void trfb_fb32_set_pixel(trfb_framebuffer_t *fb, unsigned x, unsigned y, trfb_color_t col)
-{
-	((uint32_t*)fb->pixels)[y * fb->width + x] =
-		(TRFB_COLOR_R(col) << fb->rshift) |
-		(TRFB_COLOR_G(col) << fb->gshift) |
-		(TRFB_COLOR_B(col) << fb->bshift);
-}
+TRFB_PIXEL_FUNCTIONS(8)
+TRFB_PIXEL_FUNCTIONS(16)
+TRFB_PIXEL_FUNCTIONS(32)
 
 static inline trfb_color_t trfb_framebuffer_get_pixel(trfb_framebuffer_t *fb, unsigned x, unsigned y)
 {
 	if (fb->bpp == 1) {
-		if (fb->rmask) {
-			return trfb_fb8_get_pixel(fb, x, y);
-		} else {
-			return trfb_fb_get_pixel(fb, x, y);
-		}
+		return trfb_fb8_get_pixel(fb, x, y);
 	} else if (fb->bpp == 2) {
 		return trfb_fb16_get_pixel(fb, x, y);
 	} else if (fb->bpp == 4) {
@@ -181,7 +154,7 @@ static inline trfb_color_t trfb_framebuffer_get_pixel(trfb_framebuffer_t *fb, un
 static inline void trfb_framebuffer_set_pixel(trfb_framebuffer_t *fb, unsigned x, unsigned y, trfb_color_t col)
 {
 	if (fb->bpp == 1)
-		trfb_fb_set_pixel(fb, x, y, col);
+		trfb_fb8_set_pixel(fb, x, y, col);
 	else if (fb->bpp == 2)
 		trfb_fb16_set_pixel(fb, x, y, col);
 	else if (fb->bpp == 4)

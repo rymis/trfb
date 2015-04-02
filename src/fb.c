@@ -14,46 +14,25 @@ static int isBE(void)
 	return !test.data[0];
 }
 
-#define BALL(r, g) \
-	TRFB_RGB(r, g, 0x00), \
-	TRFB_RGB(r, g, 0x33), \
-	TRFB_RGB(r, g, 0x66), \
-	TRFB_RGB(r, g, 0x99), \
-	TRFB_RGB(r, g, 0xCC), \
-	TRFB_RGB(r, g, 0xFF)
+static unsigned char norm_from_mask(unsigned char mask)
+{
+	unsigned c = mask;
+	unsigned r = 0;
 
-#define GBALL(r) \
-	BALL(r, 0x00), \
-	BALL(r, 0x33), \
-	BALL(r, 0x66), \
-	BALL(r, 0x99), \
-	BALL(r, 0xCC), \
-	BALL(r, 0xFF)
+	if (!c) {
+		return 0;
+	}
 
-const trfb_color_t trfb_framebuffer_pallete[256] = {
-	GBALL(0x00),
-	GBALL(0x33),
-	GBALL(0x66),
-	GBALL(0x99),
-	GBALL(0xCC),
-	GBALL(0xFF), /* 216 - we need 40 zeros: */
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-};
+	for (;;) {
+		c <<= 1;
+		if (c >= 0x100)
+			return r;
+		r++;
+	}
 
-/* 256 / 6 is 42 and 42 * 6 = 252. */
-#define SIX(some) \
-	some, some, some, some, some, some
-#define SEVEN(some) \
-	SIX(some), some
-const uint8_t trfb_framebuffer_revert_pallete[256] = {
-	SIX(SEVEN(0x00)), 0x00, 0x00,
-	SIX(SEVEN(0x33)),
-	SIX(SEVEN(0x66)),
-	SIX(SEVEN(0x99)),
-	SIX(SEVEN(0xCC)),
-	SIX(SEVEN(0xFF)), 0xFF, 0xFF
-};
+	/* not reached */
+	return 0;
+}
 
 /* Framebuffer support */
 trfb_framebuffer_t* trfb_framebuffer_create(unsigned width, unsigned height, unsigned char bpp)
@@ -77,7 +56,12 @@ trfb_framebuffer_t* trfb_framebuffer_create(unsigned width, unsigned height, uns
 	fb->height = height;
 	if (bpp == 1) {
 		fb->pixels = calloc(1, sz);
-		/* Mask and shift does not matter */
+		fb->rmask = TRFB_FB8_RMASK;
+		fb->gmask = TRFB_FB8_GMASK;
+		fb->bmask = TRFB_FB8_BMASK;
+		fb->rshift = TRFB_FB8_RSHIFT;
+		fb->gshift = TRFB_FB8_GSHIFT;
+		fb->bshift = TRFB_FB8_BSHIFT;
 	} else if (bpp == 2) {
 		fb->pixels = calloc(2, sz);
 		fb->rmask = TRFB_FB16_RMASK;
@@ -99,6 +83,10 @@ trfb_framebuffer_t* trfb_framebuffer_create(unsigned width, unsigned height, uns
 		free(fb);
 		return NULL;
 	}
+
+	fb->rnorm = norm_from_mask(fb->rmask);
+	fb->gnorm = norm_from_mask(fb->gmask);
+	fb->bnorm = norm_from_mask(fb->bmask);
 
 	if (!fb->pixels) {
 		trfb_msg("Not enought memory");
@@ -235,16 +223,14 @@ int trfb_framebuffer_convert(trfb_framebuffer_t *dst, trfb_framebuffer_t *src)
 		dst->height = src->height;
 	}
 
-	if ((dst->bpp == 1 && src->bpp == 1 && src->rmask == 0 && dst->rmask == 0) ||
-			(
-			 dst->bpp == src->bpp &&
-			 dst->rmask == src->rmask &&
-			 dst->gmask == src->gmask &&
-			 dst->bmask == src->bmask &&
-			 dst->rshift == src->rshift &&
-			 dst->gshift == src->gshift &&
-			 dst->bshift == src->bshift
-			)
+	if (
+		 dst->bpp == src->bpp &&
+		 dst->rmask == src->rmask &&
+		 dst->gmask == src->gmask &&
+		 dst->bmask == src->bmask &&
+		 dst->rshift == src->rshift &&
+		 dst->gshift == src->gshift &&
+		 dst->bshift == src->bshift
 	   ) { /* Format is the same! */
 		memcpy(dst->pixels, src->pixels, src->width * src->height * dst->bpp);
 		return 0;
