@@ -1,6 +1,7 @@
 #include "webcam.h"
 #include <signal.h>
 #include <sys/ioctl.h>
+#include <libv4l2.h>
 
 /**
  * Keeping tabs on opened webcam devices
@@ -25,7 +26,7 @@ static int _ioctl(int fh, int request, void *arg)
     int r;
 
     do {
-        r = ioctl(fh, request, arg);
+        r = v4l2_ioctl(fh, request, arg);
     } while (-1 == r && EINTR == errno);
 
     return r;
@@ -192,7 +193,7 @@ struct webcam *webcam_open(const char *dev)
     }
 
     // Create a file descriptor
-    fd = open(dev, O_RDWR | O_NONBLOCK, 0);
+    fd = v4l2_open(dev, O_RDWR | O_NONBLOCK, 0);
     if (-1 == fd) {
         fprintf(stderr, "Cannot open'%s': %d, %s\n",
                 dev, errno, strerror(errno));
@@ -272,7 +273,7 @@ void webcam_close(webcam_t *w)
 
     // Release memory-mapped buffers
     for (i = 0; i < w->nbuffers; i++) {
-        munmap(w->buffers[i].start, w->buffers[i].length);
+        v4l2_munmap(w->buffers[i].start, w->buffers[i].length);
     }
 
     // Free allocated resources
@@ -280,7 +281,7 @@ void webcam_close(webcam_t *w)
     free(w->name);
 
     // Close the webcam file descriptor, and free the memory
-    close(w->fd);
+    v4l2_close(w->fd);
     free(w);
 }
 
@@ -315,7 +316,7 @@ void webcam_resize(webcam_t *w, uint16_t width, uint16_t height)
     // Buffers have been created before, so clear them
     if (NULL != w->buffers) {
         for (i = 0; i < w->nbuffers; i++) {
-            munmap(w->buffers[i].start, w->buffers[i].length);
+            v4l2_munmap(w->buffers[i].start, w->buffers[i].length);
         }
 
         free(w->buffers);
@@ -369,7 +370,7 @@ void webcam_resize(webcam_t *w, uint16_t width, uint16_t height)
         }
 
         w->buffers[i].length = buf.length;
-        w->buffers[i].start = mmap(NULL, buf.length, PROT_READ | PROT_WRITE, MAP_SHARED, w->fd, buf.m.offset);
+        w->buffers[i].start = v4l2_mmap(NULL, buf.length, PROT_READ | PROT_WRITE, MAP_SHARED, w->fd, buf.m.offset);
 
         if (MAP_FAILED == w->buffers[i].start) {
             fprintf(stderr, "Mmap failed\n");
