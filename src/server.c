@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <string.h>
+#include <netinet/in.h>
 
 static int server(void *srv_in);
 
@@ -64,7 +65,7 @@ static int server(void *srv_in)
 	fd_set fds;
 	struct timeval tv;
 	int rv;
-	struct sockaddr addr;
+	struct sockaddr_storage addr;
 	socklen_t addrlen;
 	int sock;
 
@@ -108,10 +109,11 @@ static int server(void *srv_in)
 		}
 
 		if (rv > 0) {
-			sock = accept(srv->sock, &addr, &addrlen);
+			addrlen = sizeof(addr);
+			sock = accept(srv->sock, (struct sockaddr*)&addr, &addrlen);
 			trfb_msg("I:new client!");
 			if (sock >= 0) {
-				con = trfb_connection_create(srv, sock, &addr, addrlen);
+				con = trfb_connection_create(srv, sock, (struct sockaddr*)&addr, addrlen);
 				if (!con) {
 					trfb_msg("W:can not create new connection");
 				} else {

@@ -29,12 +29,6 @@ trfb_connection_t* trfb_connection_create(trfb_server_t *srv, int sock, struct s
 		return NULL;
 	}
 
-	if (addrlen > sizeof(struct sockaddr)) {
-		trfb_msg("Fatal error: addrlen > sizeof(struct sockaddr)");// (%d, %d)", (int)addrlen, (int)sizeof(struct sockaddr));
-		free(C);
-		return NULL;
-	}
-
 	C->io = trfb_io_socket_wrap(sock);
 	if (!C->io) {
 		free(C);
@@ -56,6 +50,7 @@ trfb_connection_t* trfb_connection_create(trfb_server_t *srv, int sock, struct s
 	if (rv != 0) {
 		rv = getnameinfo(addr, addrlen, host, sizeof(host), port, sizeof(port), NI_NUMERICHOST | NI_NUMERICSERV);
 	}
+
 	if (rv != 0) {
 		snprintf(C->name, sizeof(C->name), "C-%d", rand() % 1000000);
 		trfb_msg("Can not determine client information. It will be %s", C->name);
