@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <errno.h>
+#include <unistd.h>
 
 ssize_t trfb_send_all(int sock, const void *buf, size_t len)
 {
@@ -113,40 +114,6 @@ int trfb_msg_protocol_version_decode(trfb_msg_protocol_version_t *msg, const uns
 		msg->proto = trfb_v7;
 	} else {
 		msg->proto = trfb_v3;
-	}
-
-	return 0;
-}
-
-int trfb_msg_protocol_version_send(trfb_msg_protocol_version_t *msg, int sock)
-{
-	unsigned char buf[12];
-	size_t len = 12;
-
-	if (trfb_msg_protocol_version_encode(msg, buf, &len)) {
-		return -1;
-	}
-
-	if (trfb_send_all(sock, buf, len) != len) {
-		return -1;
-	}
-
-	return 0;
-}
-
-int trfb_msg_protocol_version_recv(trfb_msg_protocol_version_t *msg, int sock)
-{
-	unsigned char buf[12];
-	ssize_t len = 12;
-
-	len = trfb_recv_all(sock, buf, sizeof(buf));
-	if (len != sizeof(buf)) {
-		trfb_msg("read failed");
-		return -1;
-	}
-
-	if (trfb_msg_protocol_version_decode(msg, buf, len)) {
-		return -1;
 	}
 
 	return 0;
