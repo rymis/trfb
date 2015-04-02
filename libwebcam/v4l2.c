@@ -10,12 +10,29 @@
 #include <string.h>
 #include <sys/time.h>
 #include <sys/select.h>
-
-#define log printf
+#include <stdarg.h>
 
 #define IO_METHOD_MMAP 1
 #define IO_METHOD_USER 2
 #define IO_METHOD_READ 3
+
+static void log_full(int line, const char *fmt, ...)
+{
+	va_list args;
+	char buf[256];
+	int i;
+
+	va_start(args, fmt);
+	vsnprintf(buf, sizeof(buf), fmt, args);
+	va_end(args);
+
+	for (i = 0; buf[i]; i++)
+		if (buf[i] < 32)
+			buf[i] = ' ';
+	fprintf(stderr, "[%d] %s\n", line, buf);
+}
+
+#define log(...) log_full(__LINE__, __VA_ARGS__)
 
 struct buffer {
 	unsigned char *start;
@@ -57,14 +74,7 @@ int webcam_count(void)
 #define REINTR(rv, some) \
 	do { \
 		rv = (some); \
-		if (rv < 0) { \
-			if (errno != EINTR || errno != EAGAIN) { \
-				break; \
-			} \
-		} else { \
-			break; \
-		} \
-	} while (1)
+	} while (rv < 0 && (errno == EINTR || errno == EAGAIN))
 
 /* Try to open camera with number =num. Width and height is recomended values so you must look inside webcam_t for actual sizes. */
 webcam_t* webcam_open(int num, unsigned width, unsigned height)
@@ -199,7 +209,6 @@ int webcam_start(webcam_t *cam)
 		}
 
 		type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-
 		REINTR(rv, v4l2_ioctl(priv->fd, VIDIOC_STREAMON, &type));
 		if (rv < 0) {
 			log("streaming failed");
@@ -376,9 +385,11 @@ static int init_cam(webcam_t *cam)
 	struct v4l2_cropcap cropcap;
         struct v4l2_crop crop;
 	struct v4l2_format fmt;
+	struct v4l2_fmtdesc fmtdesc;
         unsigned min;
 	priv_t *priv = cam->priv;
 	int rv;
+	unsigned i;
 
 	/* Request for capabilities: */
 	REINTR(rv, v4l2_ioctl(priv->fd, VIDIOC_QUERYCAP, &cap));
@@ -401,6 +412,7 @@ static int init_cam(webcam_t *cam)
 		return -1;
 	}
 
+#if 0
 	/* Selecting video input and video standard: */
 	memset(&cropcap, 0, sizeof(cropcap));
 	cropcap.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -415,6 +427,25 @@ static int init_cam(webcam_t *cam)
 		if (rv < 0) {
 			log("WARN: cropping is not supported");
 		}
+	}
+#endif
+	/* Checking all formats: */
+	i = 0;
+	for (;;) {
+		char sf[6];
+		fmtdesc.index = i;
+		fmtdesc.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+
+		REINTR(rv, v4l2_ioctl(priv->fd, VIDIOC_ENUM_FMT, &fmtdesc));
+		if (rv < 0) {
+			break;
+		}
+
+		memset(sf, 0, 5);
+		memcpy(sf, &fmtdesc.pixelformat, 4);
+
+		++i;
+fprintf(stderr, "Found format: %s - %s\n", sf, fmtdesc.description);
 	}
 
 	/* Querry for video format: */
