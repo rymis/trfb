@@ -231,6 +231,8 @@ int trfb_server_lock_fb(trfb_server_t *srv, int w)
 	} else {
 		srv->updated++;
 	}
+
+	return 0;
 }
 
 int trfb_server_unlock_fb(trfb_server_t *srv)
@@ -238,6 +240,8 @@ int trfb_server_unlock_fb(trfb_server_t *srv)
 	if (!srv || !srv->fb)
 		return -1;
 	mtx_unlock(&srv->fb->lock);
+
+	return 0;
 }
 
 int trfb_server_add_event(trfb_server_t *srv, trfb_event_t *event)

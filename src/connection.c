@@ -30,7 +30,7 @@ trfb_connection_t* trfb_connection_create(trfb_server_t *srv, int sock, struct s
 	}
 
 	if (addrlen > sizeof(struct sockaddr)) {
-		trfb_msg("Fatal error: addrlen > sizeof(struct sockaddr)");
+		trfb_msg("Fatal error: addrlen > sizeof(struct sockaddr)");// (%d, %d)", (int)addrlen, (int)sizeof(struct sockaddr));
 		free(C);
 		return NULL;
 	}
@@ -165,6 +165,7 @@ static int negotiate(trfb_connection_t* con)
 	return 0;
 }
 
+#if 0
 static void print_bin(const char *name, unsigned char *p, size_t l)
 {
 	size_t i;
@@ -178,6 +179,7 @@ static void print_bin(const char *name, unsigned char *p, size_t l)
 	}
 	printf("\n}\n");
 }
+#endif
 
 static void check_stopped(trfb_connection_t *con)
 {
@@ -214,11 +216,8 @@ static struct msg_types {
 static int connection(void *con_in)
 {
 	trfb_connection_t *con = con_in;
-	unsigned char buf[BUFSIZ];
-	ssize_t len, l;
+	ssize_t l;
 	int i;
-	ssize_t pos = -1;
-	int rv;
 	unsigned char type;
 
 #define EXIT_THREAD(s) \
@@ -438,6 +437,7 @@ static void UpdateRequest(trfb_connection_t *con)
 
 	trfb_connection_read_all(con, buf, 9);
 	incr = buf[0];
+	(void)incr; /* used :) */
 	xpos = buf[1] * 256 + buf[2];
 	ypos = buf[3] * 256 + buf[4];
 	width = buf[5] * 256 + buf[6];

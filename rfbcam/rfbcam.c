@@ -84,7 +84,7 @@ int main(int argc, char *argv[])
 	}
 	webcam_stream(cam, false);
 	trfb_server_stop(srv);
-	trfb_server_free(srv);
+	trfb_server_destroy(srv);
 
 	return 0;
 }

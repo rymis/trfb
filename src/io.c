@@ -267,7 +267,7 @@ int trfb_io_flush(trfb_io_t *io, unsigned timeout)
 	} else if (r == 0) {
 		return 0; /* It is timeout */
 	} else {
-		if (r < io->wlen) {
+		if ((size_t)r < io->wlen) {
 			memmove(io->wbuf + r, io->wbuf, io->wlen - r); /* It is slow but I can't find better way */
 			io->wlen -= r;
 		} else {
