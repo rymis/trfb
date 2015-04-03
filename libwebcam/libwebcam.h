@@ -3,6 +3,19 @@
 
 #include <stdlib.h>
 
+#ifdef WEBCAM_COLOR_T
+/* User-defined type for color. It MUST be of size = 4 */
+typedef WEBCAM_COLOR_T webcam_color_t;
+#else
+# ifdef WIN32
+#  include <windows.h>
+typedef DWORD webcam_color_t;
+# else
+#  include <stdint.h>
+typedef uint32_t webcam_color_t;
+# endif
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif /* } */
@@ -18,18 +31,26 @@ typedef enum webcam_controls {
 typedef struct webcam {
 	void *priv;
 
-	unsigned width, height;
-	size_t linebytes;
+	/* Name of the camera. */
+	char *name;
 
-	unsigned char *img;
-	size_t img_len;
+	/* Width and height of the image: */
+	unsigned width, height;
+
+	/* Image data */
+	webcam_color_t *image;
+
+	/* img contains uint32_t's in form 0x00rrggbb */
 } webcam_t;
 
-/* Count all cameras connected */
-int webcam_count(void);
+/* List all cameras connected */
+int webcam_list(int *ids, unsigned *cnt);
+
+/* Get the name of camera with number =num. You must free name with free. */
+char* webcam_name(int id);
 
 /* Try to open camera with number =num. Width and height is recomended values so you must look inside webcam_t for actual sizes. */
-webcam_t* webcam_open(int num, unsigned width, unsigned height);
+webcam_t* webcam_open(int id, unsigned width, unsigned height);
 
 /* Close device and free resources */
 void webcam_close(webcam_t *cam);

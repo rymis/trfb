@@ -46,35 +46,87 @@ typedef struct webcam_private {
 	struct buffer *buffers;
 	unsigned buffers_count;
 
+	unsigned char *buf; /* read buffer */
 	size_t img_len;
+	size_t linebytes;
 } priv_t;
 
-static int init_cam(webcam_t *cam);
+static int init_cam(webcam_t *cam, const char *devname);
+static void process_image(webcam_t *cam, unsigned char *img, size_t img_len);
 
 /* Count all cameras connected */
-int webcam_count(void)
+int webcam_list(int *ids, unsigned *count)
 {
 	int i;
-	int cnt = 0;
+	unsigned cnt = 0;
 	char namebuf[128];
 	struct stat st;
+	unsigned len;
+
+	if (!count) {
+		return -1;
+	}
+
+	len = *count;
 
 	for (i = 0; i < 64; i++) {
 		snprintf(namebuf, sizeof(namebuf), "/dev/video%d", i);
 		if (stat(namebuf, &st) == 0) {
 			if (S_ISCHR(st.st_mode)) {
-				++cnt;
+				if (ids) {
+					if (cnt >= len) {
+						return -1;
+					}
+					ids[cnt++] = i;
+				} else {
+					++cnt;
+				}
 			}
 		}
 	}
 
-	return cnt;
+	*count = cnt;
+
+	return 0;
 }
 
 #define REINTR(rv, some) \
 	do { \
 		rv = (some); \
 	} while (rv < 0 && (errno == EINTR || errno == EAGAIN))
+
+char* webcam_name(int id)
+{
+	char namebuf[128];
+	char info[512];
+	int fd;
+	struct v4l2_capability cap;
+	int rv;
+
+	if (id < 0 || id >= 64) {
+		return NULL;
+	}
+
+	snprintf(namebuf, sizeof(namebuf), "/dev/video%d", id);
+	fd = v4l2_open(namebuf, O_RDWR | O_NONBLOCK, 0);
+	if (fd < 0) {
+		return NULL;
+	}
+
+	/* Request for capabilities: */
+	REINTR(rv, v4l2_ioctl(fd, VIDIOC_QUERYCAP, &cap));
+	if (rv < 0) {
+		log("ioctl failed");
+		v4l2_close(fd);
+		return NULL;
+	}
+
+	snprintf(info, sizeof(info), "%s [%s] %s: %s", cap.bus_info, cap.driver, namebuf, cap.card);
+
+	close(fd);
+
+	return strdup(info);
+}
 
 /* Try to open camera with number =num. Width and height is recomended values so you must look inside webcam_t for actual sizes. */
 webcam_t* webcam_open(int num, unsigned width, unsigned height)
@@ -135,8 +187,9 @@ webcam_t* webcam_open(int num, unsigned width, unsigned height)
 
 	res->width = width;
 	res->height = height;
+	res->image = calloc(width * height, sizeof(uint32_t));
 
-	if (init_cam(res)) {
+	if (init_cam(res, namebuf)) {
 		free(priv);
 		free(res);
 		return NULL;
@@ -164,8 +217,7 @@ void webcam_close(webcam_t *cam)
 		for (i = 0; i < priv->buffers_count; i++)
 			v4l2_munmap(priv->buffers[i].start, priv->buffers[i].len);
 	} else {
-		for (i = 0; i < priv->buffers_count; i++)
-			free(priv->buffers[i].start);
+		free(priv->buf);
 	}
 	free(priv->buffers);
 	priv->buffers = NULL;
@@ -173,6 +225,7 @@ void webcam_close(webcam_t *cam)
 
 	v4l2_close(priv->fd);
 	priv->fd = -1;
+	free(cam->image);
 
 	free(priv);
 	free(cam);
@@ -286,13 +339,13 @@ int webcam_wait_frame(webcam_t *cam, unsigned delay)
 
 	/* Read frame: */
 	if (priv->io_method == IO_METHOD_READ) {
-		REINTR(rv, v4l2_read(priv->fd, cam->img, priv->img_len));
+		REINTR(rv, v4l2_read(priv->fd, priv->buf, priv->img_len));
 		if (rv < 0) {
 			log("read error");
 			return -1;
 		}
 
-		cam->img_len = rv;
+		process_image(cam, priv->buf, priv->img_len);
 	} else if (priv->io_method == IO_METHOD_MMAP) {
 		memset(&buf, 0, sizeof(buf));
 		buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -314,8 +367,7 @@ int webcam_wait_frame(webcam_t *cam, unsigned delay)
 			log("Invalid frame");
 			return -1;
 		}
-		memcpy(cam->img, priv->buffers[buf.index].start, priv->buffers[buf.index].len);
-		cam->img_len = priv->buffers[buf.index].len;
+		process_image(cam, priv->buffers[buf.index].start, priv->buffers[buf.index].len);
 
 		REINTR(rv, v4l2_ioctl(priv->fd, VIDIOC_QBUF, &buf));
 	} else {
@@ -378,8 +430,8 @@ int webcam_get_control(webcam_t *cam, webcam_controls_t id)
 }
 
 static int init_mmap(webcam_t *cam);
-static int init_read(webcam_t *cam, size_t size);
-static int init_cam(webcam_t *cam)
+static int init_read(webcam_t *cam);
+static int init_cam(webcam_t *cam, const char *devname)
 {
 	struct v4l2_capability cap;
 	struct v4l2_cropcap cropcap;
@@ -390,6 +442,7 @@ static int init_cam(webcam_t *cam)
 	priv_t *priv = cam->priv;
 	int rv;
 	unsigned i;
+	char info[512];
 
 	/* Request for capabilities: */
 	REINTR(rv, v4l2_ioctl(priv->fd, VIDIOC_QUERYCAP, &cap));
@@ -402,6 +455,8 @@ static int init_cam(webcam_t *cam)
 		log("it is not video capture device");
 		return -1;
 	}
+
+	snprintf(info, sizeof(info), "%s [%s] %s: %s", cap.bus_info, cap.driver, devname, cap.card);
 
 	if (cap.capabilities & V4L2_CAP_STREAMING) { /* using MMAP */
 		priv->io_method = IO_METHOD_MMAP;
@@ -471,12 +526,11 @@ static int init_cam(webcam_t *cam)
 
 	cam->width = fmt.fmt.pix.width;
 	cam->height = fmt.fmt.pix.height;
-	cam->linebytes = fmt.fmt.pix.bytesperline;
-	cam->img_len = fmt.fmt.pix.sizeimage;
+	priv->linebytes = fmt.fmt.pix.bytesperline;
 	priv->img_len = fmt.fmt.pix.sizeimage;
 
-	cam->img = calloc(cam->img_len, 1);
-	if (!cam->img) {
+	cam->image = calloc(cam->width * cam->height, sizeof(webcam_color_t));
+	if (!cam->image) {
 		log("not enought memory");
 		return -1;
 	}
@@ -484,10 +538,12 @@ static int init_cam(webcam_t *cam)
 	if (priv->io_method == IO_METHOD_MMAP)
 		rv = init_mmap(cam);
 	else
-		rv = init_read(cam, fmt.fmt.pix.sizeimage);
+		rv = init_read(cam);
 
 	if (rv) {
 		log("can not init");
+		free(cam->image);
+		cam->image = NULL;
 		return -1;
 	}
 
@@ -568,13 +624,31 @@ static int init_mmap(webcam_t *cam)
 	return 0;
 }
 
-static int init_read(webcam_t *cam, size_t size)
+static int init_read(webcam_t *cam)
 {
 	priv_t *priv = cam->priv;
 
 	priv->buffers_count = 0;
 	priv->buffers = NULL;
+	priv->buf = malloc(priv->img_len);
+	if (!priv->buf) {
+		log("not enought memory");
+		return -1;
+	}
 
 	return 0;
+}
+
+static void process_image(webcam_t *cam, unsigned char *img, size_t img_len)
+{
+	unsigned x, y;
+	priv_t *priv = cam->priv;
+
+	for (y = 0; y < cam->height; y++)
+		for (x = 0; x < cam->width; x++)
+			cam->image[y * cam->width + x] =
+				(img[y * priv->linebytes + x * 3] << 16) |
+				(img[y * priv->linebytes + x * 3 + 1] << 8) |
+				(img[y * priv->linebytes + x * 3 + 2]);
 }
 

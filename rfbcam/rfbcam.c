@@ -14,17 +14,13 @@ static void sigint(int sig)
 static void draw_image(webcam_t *cam, trfb_server_t *srv)
 {
 	unsigned x, y;
-	unsigned W = cam->width * 3;
-	unsigned off;
-	unsigned char *data = cam->img;
+	webcam_color_t *data = cam->image;
 
 	trfb_server_lock_fb(srv, 1);
 
 	for (y = 0; y < cam->height; y++) {
 		for (x = 0; x < cam->width; x++) {
-			off = W * y + x;
-			trfb_framebuffer_set_pixel(srv->fb, x, y,
-					TRFB_RGB(data[off], data[off + 1], data[off + 2]));
+			trfb_framebuffer_set_pixel(srv->fb, x, y, data[y * cam->width + x]);
 		}
 	}
 
@@ -38,6 +34,10 @@ int main(int argc, char *argv[])
 	const unsigned width = 640;
 	const unsigned height = 480;
 	trfb_event_t event;
+	int brightness;
+	int contrast;
+	int saturation;
+	int gamma;
 
 	signal(SIGINT, sigint);
 
@@ -63,6 +63,10 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
+	brightness = webcam_get_control(cam, WEBCAM_BRIGHTNESS);
+	saturation = webcam_get_control(cam, WEBCAM_SATURATION);
+	gamma = webcam_get_control(cam, WEBCAM_GAMMA);
+	contrast = webcam_get_control(cam, WEBCAM_CONTRAST);
 	webcam_start(cam);
 	for (;;) {
 		if (trfb_server_updated(srv)) {
@@ -77,8 +81,50 @@ int main(int argc, char *argv[])
 						event.event.key.code == 'Q' ||
 						event.event.key.code == 0xff1b)) {
 				quit_now = 1;
+			} else if (event.type == TRFB_EVENT_KEY && event.event.key.down) {
+#define INCR(param, nm) \
+				do { \
+					if (param >= 0) { \
+						++param; \
+						if (param > 100) param = 100; \
+						webcam_set_control(cam, nm, param); \
+						printf("INFO: %s = %d\n", #param, param); \
+					} else { \
+						printf("Parameter %s is not supported\n", #param); \
+					} \
+				} while (0)
+
+#define DECR(param, nm) \
+				do { \
+					if (param >= 0) { \
+						--param; \
+						if (param < 0) param = 0; \
+						webcam_set_control(cam, nm, param); \
+						printf("INFO: %s = %d\n", #param, param); \
+					} else { \
+						printf("Parameter %s is not supported\n", #param); \
+					} \
+				} while (0)
+
+				if (event.event.key.code == 'a' || event.event.key.code == 'A') {
+					INCR(brightness, WEBCAM_BRIGHTNESS);
+				} else if (event.event.key.code == 'z' || event.event.key.code == 'Z') {
+					DECR(brightness, WEBCAM_BRIGHTNESS);
+				} else if (event.event.key.code == 's' || event.event.key.code == 'S') {
+					INCR(contrast, WEBCAM_CONTRAST);
+				} else if (event.event.key.code == 'x' || event.event.key.code == 'X') {
+					DECR(contrast, WEBCAM_CONTRAST);
+				} else if (event.event.key.code == 'd' || event.event.key.code == 'D') {
+					INCR(gamma, WEBCAM_GAMMA);
+				} else if (event.event.key.code == 'c' || event.event.key.code == 'C') {
+					DECR(gamma, WEBCAM_GAMMA);
+				} else if (event.event.key.code == 'f' || event.event.key.code == 'F') {
+					INCR(saturation, WEBCAM_SATURATION);
+				} else if (event.event.key.code == 'v' || event.event.key.code == 'V') {
+					DECR(saturation, WEBCAM_SATURATION);
+				}
+
 			}
-			printf("EVENT: %d\n", event.type);
 			trfb_event_clear(&event);
 		}
 
