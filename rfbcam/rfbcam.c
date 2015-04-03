@@ -8,7 +8,11 @@
 static int quit_now = 0;
 static void sigint(int sig)
 {
-	quit_now = 1;
+	if (sig == SIGINT)
+		quit_now = 1;
+	else {
+		fprintf(stderr, "SIGNAL: %d\n", sig);
+	}
 }
 
 static void draw_image(webcam_t *cam, trfb_server_t *srv)
@@ -40,6 +44,12 @@ int main(int argc, char *argv[])
 	int gamma;
 
 	signal(SIGINT, sigint);
+
+	signal(SIGHUP, SIG_IGN);
+	signal(SIGPIPE, SIG_IGN);
+	signal(SIGUSR1, sigint);
+	signal(SIGUSR2, sigint);
+	signal(SIGCHLD, SIG_IGN);
 
 	cam = webcam_open(0, 640, 480);
 	if (!cam) {
