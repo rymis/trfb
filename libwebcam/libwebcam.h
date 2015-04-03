@@ -19,6 +19,7 @@ typedef struct webcam {
 	void *priv;
 
 	unsigned width, height;
+	size_t linebytes;
 
 	unsigned char *img;
 	size_t img_len;

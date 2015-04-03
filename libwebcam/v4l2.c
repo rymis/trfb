@@ -274,7 +274,7 @@ int webcam_wait_frame(webcam_t *cam, unsigned delay)
 	tv.tv_sec = delay / 1000;
 	tv.tv_usec = (delay % 1000) * 1000;
 
-	REINTR(rv, select(priv->fd + 1, &fds, NULL, NULL, delay? &tv: NULL));
+	REINTR(rv, select(priv->fd + 1, &fds, NULL, NULL, &tv));
 	if (rv < 0) {
 		log("select failed");
 		return -1;
@@ -323,7 +323,7 @@ int webcam_wait_frame(webcam_t *cam, unsigned delay)
 		return -1;
 	}
 
-	return 0;
+	return 1;
 }
 
 /* Set control to camera. Value must be in interval [0-100] */
@@ -412,7 +412,6 @@ static int init_cam(webcam_t *cam)
 		return -1;
 	}
 
-#if 0
 	/* Selecting video input and video standard: */
 	memset(&cropcap, 0, sizeof(cropcap));
 	cropcap.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -428,10 +427,9 @@ static int init_cam(webcam_t *cam)
 			log("WARN: cropping is not supported");
 		}
 	}
-#endif
+
 	/* Checking all formats: */
-	i = 0;
-	for (;;) {
+	for (i = 0;; i++) {
 		char sf[6];
 		fmtdesc.index = i;
 		fmtdesc.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -444,8 +442,7 @@ static int init_cam(webcam_t *cam)
 		memset(sf, 0, 5);
 		memcpy(sf, &fmtdesc.pixelformat, 4);
 
-		++i;
-fprintf(stderr, "Found format: %s - %s\n", sf, fmtdesc.description);
+/* TODO: determine format to use */
 	}
 
 	/* Querry for video format: */
@@ -474,6 +471,15 @@ fprintf(stderr, "Found format: %s - %s\n", sf, fmtdesc.description);
 
 	cam->width = fmt.fmt.pix.width;
 	cam->height = fmt.fmt.pix.height;
+	cam->linebytes = fmt.fmt.pix.bytesperline;
+	cam->img_len = fmt.fmt.pix.sizeimage;
+	priv->img_len = fmt.fmt.pix.sizeimage;
+
+	cam->img = calloc(cam->img_len, 1);
+	if (!cam->img) {
+		log("not enought memory");
+		return -1;
+	}
 
 	if (priv->io_method == IO_METHOD_MMAP)
 		rv = init_mmap(cam);
@@ -496,7 +502,6 @@ static int init_mmap(webcam_t *cam)
 	int rv;
 	priv_t *priv = cam->priv;
 	unsigned i, j;
-	int ok;
 
 	memset(&req, 0, sizeof(req));
 	req.count = 4;
@@ -505,7 +510,10 @@ static int init_mmap(webcam_t *cam)
 
 	REINTR(rv, v4l2_ioctl(priv->fd, VIDIOC_REQBUFS, &req));
 	if (rv < 0) {
-		log("Memory mapping is not supported");
+		if (errno == EINVAL)
+			log("Memory mapping is not supported");
+		else
+			log("Can not init buffers");
 		return -1;
 	}
 
@@ -519,23 +527,14 @@ static int init_mmap(webcam_t *cam)
 		log("Not enought memory");
 		return -1;
 	}
-	cam->img = malloc(cam->width * cam->height * 3);
-	if (!cam->img) {
-		free(priv->buffers);
-		priv->buffers = NULL;
-		log("Not enought memory");
-		return -1;
-	}
-	priv->img_len = cam->width * cam->height * 3;
 
 	for (i = 0; i < req.count; i++) {
 		memset(&buf, 0, sizeof(buf));
 
-		buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+		buf.type = req.type;
 		buf.memory = V4L2_MEMORY_MMAP;
 		buf.index = i;
 
-		ok = 0;
 		REINTR(rv, v4l2_ioctl(priv->fd, VIDIOC_QUERYBUF, &buf));
 		if (rv == 0) {
 			priv->buffers[i].len = buf.length;
@@ -544,24 +543,24 @@ static int init_mmap(webcam_t *cam)
 					PROT_READ | PROT_WRITE,
 					MAP_SHARED,
 					priv->fd, buf.m.offset);
-			if (priv->buffers[i].start != MAP_FAILED)
-				ok++;
+			if (priv->buffers[i].start == MAP_FAILED)
+				break;
+		} else {
+			break;
+		}
+	}
+
+	if (i < req.count) {
+		for (j = 0; j < i; j++) {
+			v4l2_munmap(priv->buffers[j].start, priv->buffers[j].len);
 		}
 
-		if (!ok) {
-			for (j = 0; j < i; j++) {
-				v4l2_munmap(priv->buffers[j].start, priv->buffers[j].len);
-			}
+		free(priv->buffers);
+		priv->buffers = NULL;
 
-			free(priv->buffers);
-			priv->buffers = NULL;
-			free(cam->img);
-			cam->img = NULL;
+		log("mmap failed");
 
-			log("mmap failed");
-
-			return -1;
-		}
+		return -1;
 	}
 
 	priv->buffers_count = req.count;
@@ -573,19 +572,8 @@ static int init_read(webcam_t *cam, size_t size)
 {
 	priv_t *priv = cam->priv;
 
-	if (size < cam->width * cam->height * 3)
-		size = cam->width * cam->height * 3;
-
-	cam->img = malloc(size);
-	if (!cam->img) {
-		log("Not enought memory");
-		return -1;
-	}
-
 	priv->buffers_count = 0;
 	priv->buffers = NULL;
-	priv->img_len = size;
-	cam->img_len = size;
 
 	return 0;
 }

@@ -25,6 +25,7 @@ static int _ioctl(int fh, int request, void *arg)
 {
     int r;
 
+    fprintf(stderr, "IOCTL: %d, %08x\n", fh, request);
     do {
         r = v4l2_ioctl(fh, request, arg);
     } while (-1 == r && EINTR == errno);
