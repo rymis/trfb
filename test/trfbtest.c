@@ -9,7 +9,11 @@
 static int quit_now = 0;
 static void sigint(int sig)
 {
-	quit_now = 1;
+	if (sig == SIGINT)
+		quit_now = 1;
+	else {
+		fprintf(stderr, "SIGNAL: %d\n", sig);
+	}
 }
 
 int main(int argc, char *argv[])
@@ -19,6 +23,12 @@ int main(int argc, char *argv[])
 	trfb_event_t event;
 
 	signal(SIGINT, sigint);
+
+	signal(SIGHUP, SIG_IGN);
+	signal(SIGPIPE, SIG_IGN);
+	signal(SIGUSR1, sigint);
+	signal(SIGUSR2, sigint);
+	signal(SIGCHLD, SIG_IGN);
 
 	srv = trfb_server_create(640, 480, 4);
 	if (!srv) {
