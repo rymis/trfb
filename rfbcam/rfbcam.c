@@ -82,12 +82,15 @@ int main(int argc, char *argv[])
 		}
 
 		while (trfb_server_poll_event(srv, &event)) {
+#ifdef ENABLE_QUIT_KEY
 			if (event.type == TRFB_EVENT_KEY && (
 						event.event.key.code == 'q' ||
 						event.event.key.code == 'Q' ||
 						event.event.key.code == 0xff1b)) {
 				quit_now = 1;
-			} else if (event.type == TRFB_EVENT_KEY && event.event.key.down) {
+			} else
+#endif
+			if (event.type == TRFB_EVENT_KEY && event.event.key.down) {
 #define INCR(param, nm) \
 				do { \
 					if (param >= 0) { \
