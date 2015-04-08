@@ -129,32 +129,21 @@ char* webcam_name(int id)
 }
 
 /* Try to open camera with number =num. Width and height is recomended values so you must look inside webcam_t for actual sizes. */
-webcam_t* webcam_open(int num, unsigned width, unsigned height)
+webcam_t* webcam_open(int id, unsigned width, unsigned height)
 {
-	int i;
-	int cnt = 0;
 	char namebuf[128];
 	struct stat st;
-	int found = 0;
 	webcam_t *res;
 	priv_t *priv;
 
-	for (i = 0; i < 64; i++) {
-		snprintf(namebuf, sizeof(namebuf), "/dev/video%d", i);
-		if (stat(namebuf, &st) == 0) {
-			if (S_ISCHR(st.st_mode)) {
-				if (cnt == num) {
-					found++;
-					break;
-				}
-
-				++cnt;
-			}
-		}
+	if (id < 0 || id >= 64) {
+		/* Invalid ID */
+		return NULL;
 	}
 
-	if (!found) {
-		log("Camera is not found: %d", num);
+	snprintf(namebuf, sizeof(namebuf), "/dev/video%d", id);
+	if (!stat(namebuf, &st) == 0 || S_ISCHR(st.st_mode)) {
+		/* Can't stat */
 		return NULL;
 	}
 
@@ -170,6 +159,10 @@ webcam_t* webcam_open(int num, unsigned width, unsigned height)
 		return NULL;
 	}
 
+	res->width = width;
+	res->height = height;
+	/* res->image = calloc(width * height, sizeof(uint32_t)); */
+
 	priv = res->priv = calloc(1, sizeof(priv_t));
 	if (!priv) {
 		log("Not enought memory");
@@ -184,15 +177,25 @@ webcam_t* webcam_open(int num, unsigned width, unsigned height)
 		free(res);
 		return NULL;
 	}
-
-	res->width = width;
-	res->height = height;
-	res->image = calloc(width * height, sizeof(uint32_t));
+	priv->io_method = IO_METHOD_MMAP;
 
 	if (init_cam(res, namebuf)) {
-		free(priv);
-		free(res);
-		return NULL;
+		close(priv->fd);
+		priv->fd = v4l2_open(namebuf, O_RDWR | O_NONBLOCK, 0);
+		if (priv->fd < 0) {
+			log("Can't open device `%s' (%s)", namebuf, strerror(errno));
+			free(priv);
+			free(res);
+			return NULL;
+		}
+		priv->io_method = IO_METHOD_READ;
+
+		if (init_cam(res, namebuf)) {
+			close(priv->fd);
+			free(priv);
+			free(res);
+			return NULL;
+		}
 	}
 
 	return res;
@@ -458,10 +461,14 @@ static int init_cam(webcam_t *cam, const char *devname)
 
 	snprintf(info, sizeof(info), "%s [%s] %s: %s", cap.bus_info, cap.driver, devname, cap.card);
 
-	if (cap.capabilities & V4L2_CAP_STREAMING) { /* using MMAP */
-		priv->io_method = IO_METHOD_MMAP;
-	} else if (cap.capabilities & V4L2_CAP_READWRITE) { /* usig READ */
-		priv->io_method = IO_METHOD_READ;
+	if (priv->io_method == IO_METHOD_MMAP) {
+		if (!(cap.capabilities & V4L2_CAP_STREAMING)) {
+			return -1;
+		}
+	} else if (priv->io_method == IO_METHOD_READ) {
+		if (!(cap.capabilities & V4L2_CAP_READWRITE)) { /* usig READ */
+			return -1;
+		}
 	} else {
 		log("Can't get frames");
 		return -1;
