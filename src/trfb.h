@@ -82,6 +82,8 @@ typedef struct trfb_framebuffer {
 	 */
 
 	void *pixels;
+	/* Free pixels information or not */
+	int free_pixels;
 } trfb_framebuffer_t;
 
 /* FB8 is BGR233 format: */
@@ -311,6 +313,7 @@ int trfb_io_fputc(unsigned char c, trfb_io_t *io, unsigned timeout);
 
 trfb_framebuffer_t* trfb_framebuffer_create(unsigned width, unsigned height, unsigned char bpp);
 trfb_framebuffer_t* trfb_framebuffer_create_of_format(unsigned width, unsigned height, trfb_format_t *fmt);
+trfb_framebuffer_t* trfb_framebuffer_create_with_data(void *pixels, unsigned width, unsigned height, trfb_format_t *fmt);
 void trfb_framebuffer_free(trfb_framebuffer_t *fb);
 int trfb_framebuffer_resize(trfb_framebuffer_t *fb, unsigned width, unsigned height);
 int trfb_framebuffer_convert(trfb_framebuffer_t *dst, trfb_framebuffer_t *src);

@@ -93,6 +93,7 @@ trfb_framebuffer_t* trfb_framebuffer_create(unsigned width, unsigned height, uns
 		free(fb);
 		return NULL;
 	}
+	fb->free_pixels = 1;
 
 	if (mtx_init(&fb->lock, mtx_plain) != thrd_success) {
 		free(fb->pixels);
@@ -126,6 +127,7 @@ trfb_framebuffer_t* trfb_framebuffer_copy(trfb_framebuffer_t *fb)
 		free(c);
 		return NULL;
 	}
+	c->free_pixels = 1;
 
 	memcpy(c->pixels, fb->pixels, len);
 
@@ -135,7 +137,8 @@ trfb_framebuffer_t* trfb_framebuffer_copy(trfb_framebuffer_t *fb)
 void trfb_framebuffer_free(trfb_framebuffer_t *fb)
 {
 	if (fb) {
-		free(fb->pixels);
+		if (fb->free_pixels)
+			free(fb->pixels);
 		mtx_destroy(&fb->lock);
 		free(fb);
 	}
@@ -165,6 +168,9 @@ int trfb_framebuffer_resize(trfb_framebuffer_t *fb, unsigned width, unsigned hei
 		} \
 		for (y = 0; y < H; y++) \
 			memcpy(np + y * width, p + y * fb->width, W * sizeof(tp)); \
+		if (fb->free_pixels) \
+			free(fb->pixels); \
+		fb->pixels = np; \
 	} while (0)
 
 	if (fb->bpp == 1) {
@@ -213,11 +219,17 @@ int trfb_framebuffer_convert(trfb_framebuffer_t *dst, trfb_framebuffer_t *src)
 
 	/* If image has another size we need to change it: */
 	if (dst->width != src->width || dst->height != src->height) {
-		void *p = realloc(dst->pixels, src->width * src->height * dst->bpp);
+		void *p;
+		if (dst->free_pixels) {
+			p = realloc(dst->pixels, src->width * src->height * dst->bpp);
+		} else {
+			p = malloc(src->width * src->height * dst->bpp);
+		}
 		if (!p) {
 			trfb_msg("Not enought memory!");
 			return -1;
 		}
+		dst->free_pixels = 1;
 		dst->pixels = p;
 		dst->width = src->width;
 		dst->height = src->height;
@@ -287,7 +299,7 @@ trfb_framebuffer_t* trfb_framebuffer_create_of_format(unsigned width, unsigned h
 		return NULL;
 	}
 
-	if (fmt->bpp != 8 && fmt->bpp != 16 && fmt->bpp != 32) {
+	if (fmt->bpp != 1 && fmt->bpp != 2 && fmt->bpp != 4) {
 		trfb_msg("Invalid format: BPP = %d", fmt->bpp);
 		return NULL;
 	}
@@ -303,6 +315,47 @@ trfb_framebuffer_t* trfb_framebuffer_create_of_format(unsigned width, unsigned h
 	fb->rshift = fmt->rshift;
 	fb->gshift = fmt->gshift;
 	fb->bshift = fmt->bshift;
+
+	fb->rnorm = norm_from_mask(fb->rmask);
+	fb->gnorm = norm_from_mask(fb->gmask);
+	fb->bnorm = norm_from_mask(fb->bmask);
+
+	return fb;
+}
+
+trfb_framebuffer_t* trfb_framebuffer_create_with_data(void *pixels, unsigned width, unsigned height, trfb_format_t *fmt)
+{
+	trfb_framebuffer_t *fb;
+
+	if (!fmt) {
+		trfb_msg("Invalid arguments");
+		return NULL;
+	}
+
+	if (fmt->bpp != 1 && fmt->bpp != 2 && fmt->bpp != 4) {
+		trfb_msg("Invalid format: BPP = %d", fmt->bpp);
+		return NULL;
+	}
+
+	fb = calloc(1, sizeof(trfb_framebuffer_t));
+	if (!fb) {
+		trfb_msg("Not enought memory");
+		return NULL;
+	}
+
+	fb->pixels = pixels;
+	fb->free_pixels = 0;
+
+	fb->rmask = fmt->rmax;
+	fb->gmask = fmt->gmax;
+	fb->bmask = fmt->bmax;
+	fb->rshift = fmt->rshift;
+	fb->gshift = fmt->gshift;
+	fb->bshift = fmt->bshift;
+
+	fb->rnorm = norm_from_mask(fb->rmask);
+	fb->gnorm = norm_from_mask(fb->gmask);
+	fb->bnorm = norm_from_mask(fb->bmask);
 
 	return fb;
 }

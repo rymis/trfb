@@ -1,10 +1,18 @@
 #include <libwebcam.h>
 #include <stdio.h>
 #include <string.h>
-#include <jpeglib.h>
+
+#if HAVE_JPEGLIB_H
+# include <jpeglib.h>
+# define USE_JPEG 1
+#else
+# define USE_JPEG 0
+#endif
+
 #include <stdio.h>
 #include <errno.h>
 
+#if USE_JPEG
 int save_jpeg(const char *filename, int quality, webcam_color_t *data, int width, int height)
 {
 	struct jpeg_compress_struct cinfo;
@@ -56,6 +64,33 @@ int save_jpeg(const char *filename, int quality, webcam_color_t *data, int width
 
 	return 0;
 }
+#else
+
+/* We don't have any JPEG so lets save pnm :) */
+int save_jpeg(const char *filename, int quality, webcam_color_t *data, int width, int height)
+{
+	FILE *f = fopen(filename, "wb");
+	int x, y;
+	if (!f) {
+		fprintf(stderr, "Can't open file: %s\n", strerror(errno));
+		return -1;
+	}
+
+	fprintf(f, "P6\n%d %d\n255\n", width, height);
+	for (y = 0; y < height; y++) {
+		for (x = 0; x < width; x++) {
+			fputc((data[y * width + x] >> 16) & 0xff, f);
+			fputc((data[y * width + x] >> 8) & 0xff, f);
+			fputc((data[y * width + x]) & 0xff, f);
+		}
+	}
+
+	fclose(f);
+
+	return 0;
+}
+
+#endif
 
 int main(int argc, char **argv)
 {
@@ -97,7 +132,7 @@ int main(int argc, char **argv)
 	for (;;) {
 		if (webcam_wait_frame(w, 10) > 0) {
 			printf("Storing frame %d\n", i);
-			sprintf(fn, "frame_%d.jpg", i);
+			sprintf(fn, "frame_%d.%s", i, USE_JPEG? "jpg": "pnm");
 
 			save_jpeg(fn, 75, w->image, w->width, w->height);
 			i++;
