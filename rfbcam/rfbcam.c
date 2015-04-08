@@ -15,21 +15,13 @@ static void sigint(int sig)
 	}
 }
 
+#if 0
 static void draw_image(webcam_t *cam, trfb_server_t *srv)
 {
 	unsigned x, y;
 	webcam_color_t *data = cam->image;
-
-	trfb_server_lock_fb(srv, 1);
-
-	for (y = 0; y < cam->height; y++) {
-		for (x = 0; x < cam->width; x++) {
-			trfb_framebuffer_set_pixel(srv->fb, x, y, data[y * cam->width + x]);
-		}
-	}
-
-	trfb_server_unlock_fb(srv);
 }
+#endif
 
 int main(int argc, char *argv[])
 {
@@ -80,9 +72,13 @@ int main(int argc, char *argv[])
 	webcam_start(cam);
 	for (;;) {
 		if (trfb_server_updated(srv)) {
+			trfb_server_lock_fb(srv, 0);
 			if (webcam_wait_frame(cam, 10) > 0) {
-				draw_image(cam, srv);
+				trfb_server_unlock_fb(srv);
+				trfb_server_lock_fb(srv, 1);
+				/* draw_image(cam, srv); */
 			}
+			trfb_server_unlock_fb(srv);
 		}
 
 		while (trfb_server_poll_event(srv, &event)) {

@@ -535,9 +535,13 @@ static int init_cam(webcam_t *cam, const char *devname)
 		return -1;
 	}
 
-	if (priv->io_method == IO_METHOD_MMAP)
+	if (priv->io_method == IO_METHOD_MMAP) {
 		rv = init_mmap(cam);
-	else
+		if (rv < 0) {
+			priv->io_method = IO_METHOD_READ;
+			rv = init_read(cam);
+		}
+	} else
 		rv = init_read(cam);
 
 	if (rv) {
