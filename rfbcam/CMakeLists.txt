@@ -2,5 +2,5 @@ INCLUDE_DIRECTORIES("${PROJECT_SOURCE_DIR}/src")
 INCLUDE_DIRECTORIES("${PROJECT_SOURCE_DIR}/libwebcam")
 
 ADD_EXECUTABLE(rfbcam rfbcam.c)
-TARGET_LINK_LIBRARIES(rfbcam trfb pthread webcam v4l2)
+TARGET_LINK_LIBRARIES(rfbcam trfb pthread webcam ${LIBWEBCAM_LIBS})
 
