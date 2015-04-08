@@ -144,7 +144,7 @@ webcam_t* webcam_open(int id, unsigned width, unsigned height)
 	}
 
 	snprintf(namebuf, sizeof(namebuf), "/dev/video%d", id);
-	if (!stat(namebuf, &st) == 0 || S_ISCHR(st.st_mode)) {
+	if (stat(namebuf, &st) != 0 || !S_ISCHR(st.st_mode)) {
 		log("Can't find device: %d", id);
 		return NULL;
 	}
