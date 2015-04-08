@@ -104,12 +104,14 @@ char* webcam_name(int id)
 	int rv;
 
 	if (id < 0 || id >= 64) {
+		log("Invalid camera ID");
 		return NULL;
 	}
 
 	snprintf(namebuf, sizeof(namebuf), "/dev/video%d", id);
 	fd = v4l2_open(namebuf, O_RDWR | O_NONBLOCK, 0);
 	if (fd < 0) {
+		log("Can't open `%s' (%s)", namebuf, strerror(errno));
 		return NULL;
 	}
 
@@ -137,13 +139,13 @@ webcam_t* webcam_open(int id, unsigned width, unsigned height)
 	priv_t *priv;
 
 	if (id < 0 || id >= 64) {
-		/* Invalid ID */
+		log(" Invalid ID ");
 		return NULL;
 	}
 
 	snprintf(namebuf, sizeof(namebuf), "/dev/video%d", id);
 	if (!stat(namebuf, &st) == 0 || S_ISCHR(st.st_mode)) {
-		/* Can't stat */
+		log("Can't find device: %d", id);
 		return NULL;
 	}
 
@@ -191,6 +193,7 @@ webcam_t* webcam_open(int id, unsigned width, unsigned height)
 		priv->io_method = IO_METHOD_READ;
 
 		if (init_cam(res, namebuf)) {
+			log("Can not init device: `%s'", namebuf);
 			close(priv->fd);
 			free(priv);
 			free(res);
