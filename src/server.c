@@ -219,7 +219,7 @@ static void stop_all_connections(trfb_server_t *srv)
 		}
 	}
 
-	trfb_msg("I:all clients have been stoped...");
+	trfb_msg("I:all clients have been stopped.");
 	return;
 }
 
