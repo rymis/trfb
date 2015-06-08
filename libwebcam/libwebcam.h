@@ -20,6 +20,11 @@ typedef uint32_t webcam_color_t;
 extern "C" {
 #endif /* } */
 
+#define webcam_color_r(c) (((c) >> 16) & 0xff)
+#define webcam_color_g(c) (((c) >> 8) & 0xff)
+#define webcam_color_b(c) ((c) & 0xff)
+#define webcam_color_rgb(r, g, b) (((r) << 16) | ((g) << 8) | (b))
+
 /* Here you can see only must frequently used controls */
 typedef enum webcam_controls {
 	WEBCAM_BRIGHTNESS,
@@ -29,15 +34,17 @@ typedef enum webcam_controls {
 } webcam_controls_t;
 
 typedef enum webcam_colorspace {
-	WEBCAM_RGB24,            /*          rrrrrrrr gggggggg bbbbbbbb */
-	WEBCAM_BGR24,            /*          bbbbbbbb gggggggg rrrrrrrr */
-	WEBCAM_RGB32,            /* 00000000 rrrrrrrr gggggggg bbbbbbbb */
-	WEBCAM_RGB555,           /*                   0rrrrrgg gggbbbbb */
-	WEBCAM_RGB565,           /*                   rrrrrggg gggbbbbb */
-	WEBCAM_RGB332,           /*                            rrrgggbb */
-	WEBCAM_YUV,              /*          yyyyyyyy uuuuuuuu vvvvvvvv */
-	WEBCAM_GRAY,             /*                            yyyyyyyy */
-	WEBCAM_JPEG              /* JPEG encoded data                   */
+	WEBCAM_RGB32,            /* 00000000 rrrrrrrr gggggggg bbbbbbbb as uint32_t */
+	WEBCAM_RGB24,            /*          rrrrrrrr gggggggg bbbbbbbb             */
+	WEBCAM_BGR24,            /*          bbbbbbbb gggggggg rrrrrrrr             */
+	WEBCAM_RGB555,           /*                   0rrrrrgg gggbbbbb             */
+	WEBCAM_RGB565,           /*                   rrrrrggg gggbbbbb             */
+	WEBCAM_RGB332,           /*                            rrrgggbb             */
+	WEBCAM_BGR233,           /*                            bbgggrrr             */
+	WEBCAM_YUV,              /*          yyyyyyyy uuuuuuuu vvvvvvvv             */
+	WEBCAM_YUV422,           /*          Y Cb Y Cr... as bytes                  */
+	WEBCAM_GRAY,             /*                            yyyyyyyy             */
+	WEBCAM_JPEG              /* JPEG encoded data                               */
 } webcam_colorspace_t;
 
 typedef struct webcam {
