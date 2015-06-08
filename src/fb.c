@@ -299,12 +299,14 @@ trfb_framebuffer_t* trfb_framebuffer_create_of_format(unsigned width, unsigned h
 		return NULL;
 	}
 
+	fmt->bpp /= 8;
+
 	if (fmt->bpp != 1 && fmt->bpp != 2 && fmt->bpp != 4) {
 		trfb_msg("Invalid format: BPP = %d", fmt->bpp);
 		return NULL;
 	}
 
-	fb = trfb_framebuffer_create(width, height, fmt->bpp / 8);
+	fb = trfb_framebuffer_create(width, height, fmt->bpp);
 	if (!fb) {
 		return NULL;
 	}
